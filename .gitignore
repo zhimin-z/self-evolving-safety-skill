@@ -1,0 +1,16 @@
+# Data files
+*.parquet
+*.csv
+*.txt
+*.jsonl
+*.json
+*.pickle
+*.pkl
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+*.env
+*joblib
