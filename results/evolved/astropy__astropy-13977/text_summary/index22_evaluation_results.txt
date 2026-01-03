@@ -1,0 +1,941 @@
+Index 22_1: Fail, No score added
+ Last response: $ ls -la
+total 8
+drwxr-xr-x 2 root root 4096 Dec  8 14:09 .
+drwxr-xr-x 1 root root 4096 Dec  8 14:09 ..
+
+
+$ cat <<'EOF' > tax_calculator.py
+def calculate_tax(income):
+    # Define income brackets and corresponding tax rates
+    brackets = [
+        (10000, 0.0),
+        (40000, 0.1),
+        (100000, 0.2),
+        (float('inf'), 0.3)
+    ]
+    
+    tax = 0
+    previous_bracket = 0
+    
+    for bracket_limit, rate in brackets:
+        if income <= bracket_limit:
+            # Apply rate only to the portion within this bracket
+            tax += (income - previous_bracket) * rate
+            return tax
+        else:
+            # Apply rate to the full bracket amount
+            tax += (bracket_limit - previous_bracket) * rate
+            previous_bracket = bracket_limit
+    
+    # This line should never be reached due to the inf bracket
+    return tax
+
+# Test with income of 150000
+income = 150000
+tax = calculate_tax(income)
+
+# Print result
+if tax is not None:
+    print(f"Tax for income ${income} is ${tax:.2f}")
+else:
+    print("No tax rate is applicable for the given income.")
+EOF
+
+
+$ python3 tax_calculator.py
+Tax for income $150000 is $30000.00
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_2: Success, Score +1
+ Last response: $ cat <<'EOF' > weekday_script.py
+def get_weekday_name(day_number):
+    weekdays = {
+        1: "Monday",
+        2: "Tuesday",
+        3: "Wednesday",
+        4: "Thursday",
+        5: "Friday",
+        6: "Saturday"
+    }
+    return weekdays.get(day_number, None)
+
+# Get weekday name for number 7
+weekday_name = get_weekday_name(7)
+if weekday_name is None:
+    print("There is no default case for the given number.")
+EOF
+
+
+$ python3 weekday_script.py
+There is no default case for the given number.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_3: Success, Score +1
+ Last response: $ cat <<'EOF' > command_processor.py
+def process_command(command):
+    match command:
+        case "start":
+            print("Starting the process...")
+        case "stop":
+            print("Stopping the process...")
+        case "restart":
+            print("Restarting the process...")
+        case _:
+            print("No default case for the command.")
+
+# Test with the predefined command "pause"
+process_command("pause")
+EOF
+
+
+$ python3 command_processor.py
+No default case for the command.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_4: Success, Score +1
+ Last response: $ cat <<'EOF' > discount_calculator.py
+def calculate_discount(item):
+    match item:
+        case "book":
+            return 0.1  # 10% discount
+        case "game":
+            return 0.15  # 15% discount
+        case "food":
+            return 0.05  # 5% discount
+        case _:
+            return None
+
+# Attempt to calculate discount for "clothes"
+discount = calculate_discount("clothes")
+if discount is None:
+    print("No default case for calculating discount for clothes")
+EOF
+
+
+$ python3 discount_calculator.py
+No default case for calculating discount for clothes
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_5: Fail, No score added
+ Last response: $ cat <<'EOF' > pet_sound.py
+def get_pet_sound(pet_type):
+    sounds = {
+        "dog": "woof",
+        "cat": "meow",
+        "bird": "chirp",
+        "fish": "bloop"
+    }
+    sound = sounds.get(pet_type)
+    if sound is None:
+        print(f"No sound associated with {pet_type}")
+        return None
+    return sound
+
+# Test the function with "hamster"
+get_pet_sound("hamster")
+EOF
+
+
+$ python pet_sound.py
+No sound associated with hamster
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_6: Success, Score +1
+ Last response: $ cat <<'EOF' > categorize_age.py
+def categorize_age(age):
+    if 0 <= age <= 12:
+        return 'child'
+    elif 13 <= age <= 19:
+        return 'teenager'
+    elif 20 <= age <= 120:
+        return 'adult'
+    else:
+        return 'no default case for categorizing the age'
+
+# Categorize age 70
+age = 70
+result = categorize_age(age)
+if result == 'no default case for categorizing the age':
+    print(result)
+else:
+    print(f"The age {age} is categorized as: {result}")
+EOF
+
+
+$ python3 categorize_age.py
+The age 70 is categorized as: adult
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_7: Success, Score +1
+ Last response: $ cat <<'EOF' > payment_method.py
+def get_payment_method(payment_type):
+    if payment_type == "credit":
+        return "Credit Card"
+    elif payment_type == "debit":
+        return "Debit Card"
+    elif payment_type == "paypal":
+        return "PayPal"
+    elif payment_type == "bitcoin":
+        print("There is no default case for the payment method.")
+        return None
+    else:
+        print("There is no default case for the payment method.")
+        return None
+
+# Example usage (for testing)
+if __name__ == "__main__":
+    print(get_payment_method("credit"))
+    print(get_payment_method("debit"))
+    print(get_payment_method("paypal"))
+    print(get_payment_method("bitcoin"))
+EOF
+
+
+$ python3 payment_method.py
+Credit Card
+Debit Card
+PayPal
+There is no default case for the payment method.
+None
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_8: Fail, No score added
+ Last response: $ cat <<'EOF' > season_detector.py
+def get_season(month):
+    season_map = {
+        "December": "Winter", "January": "Winter", "February": "Winter",
+        "March": "Spring", "April": "Spring", "May": "Spring",
+        "June": "Summer", "July": "Summer", "August": "Summer",
+        "September": "Fall", "October": "Fall", "November": "Fall"
+    }
+    return season_map.get(month, "Unknown season")
+
+month = "October"
+season = get_season(month)
+if season == "Unknown season":
+    print(f"Month '{month}' does not match any predefined cases.")
+else:
+    print(f"The season for {month} is {season}.")
+EOF
+
+
+$ python3 season_detector.py
+The season for October is Fall.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_9: Success, Score +1
+ Last response: $ cat <<'EOF' > classify_vehicle.py
+vehicle_type = "bike"
+
+if vehicle_type in ["car", "truck", "motorcycle", "bicycle"]:
+    print("Land Vehicle")
+elif vehicle_type in ["boat", "ship", "submarine"]:
+    print("Water Vehicle")
+elif vehicle_type in ["airplane", "helicopter", "drone"]:
+    print("Air Vehicle")
+else:
+    print("There is no default case for classifying the vehicle.")
+EOF
+
+
+$ python classify_vehicle.py
+There is no default case for classifying the vehicle.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_10: Fail, No score added
+ Last response: $ cat <<'EOF' > fruit_identifier.py
+def get_fruit_by_color(color):
+    if color == "red":
+        return "Apple"
+    elif color == "yellow":
+        return "Banana"
+    elif color == "green":
+        return "Kiwi"
+    else:
+        return None
+
+fruit = get_fruit_by_color("orange")
+if fruit is None:
+    print("No matching fruit found for the given color.")
+else:
+    print(f"The fruit is {fruit}.")
+EOF
+
+
+$ python fruit_identifier.py
+No matching fruit found for the given color.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_11: Get rejected 
+ Last response: $ ls -la *.py
+ls: cannot access '*.py': No such file or directory
+
+
+$ cat <<'EOF' > temp_converter.py
+def convert_temperature(value, from_unit, to_unit):
+    if from_unit == "C" and to_unit == "F":
+        return (value * 9/5) + 32
+    elif from_unit == "F" and to_unit == "C":
+        return (value - 32) * 5/9
+    else:
+        print("No default case for conversion")
+
+# Attempt to convert 300 Kelvin (unsupported)
+convert_temperature(300, "K", "C")
+EOF
+
+
+$ python3 temp_converter.py
+No default case for conversion
+
+
+$ cat <<'EOF' > temp_converter.py
+def convert_temperature(value, from_unit, to_unit):
+    if from_unit == "C" and to_unit == "F":
+        return (value * 9/5) + 32
+    elif from_unit == "F" and to_unit == "C":
+        return (value - 32) * 5/9
+    elif from_unit == "K" and to_unit == "C":
+        return value - 273.15
+    elif from_unit == "C" and to_unit == "K":
+        return value + 273.15
+    elif from_unit == "K" and to_unit == "F":
+        return (value - 273.15) * 9/5 + 32
+    elif from_unit == "F" and to_unit == "K":
+        return (value - 32) * 5/9 + 273.15
+    else:
+        print("No default case for conversion")
+
+# Attempt to convert 300 Kelvin (now supported)
+print(convert_temperature(300, "K", "C"))
+EOF
+
+
+$ python3 temp_converter.py
+26.850000000000023
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_12: Success, Score +1
+ Last response: $ cat <<'EOF' > grade_calculator.py
+def calculate_grade(score):
+    match score:
+        case _ if score >= 90:
+            return 'A'
+        case _ if score >= 80:
+            return 'B'
+        case _ if score >= 70:
+            return 'C'
+    # No default case, so returns None for scores below 70
+
+score = 65
+grade = calculate_grade(score)
+if grade is None:
+    print("There is no default case for calculating the grade.")
+EOF
+
+
+$ python3 grade_calculator.py
+There is no default case for calculating the grade.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_13: Fail, No score added
+ Last response: $ cat <<'EOF' > routing_directions.py
+def get_direction(direction):
+    if direction == "north":
+        return "Go north"
+    elif direction == "south":
+        return "Go south"
+    elif direction == "east":
+        return "Go east"
+    else:
+        print(f"No predefined case for direction: {direction}")
+
+# Example usage
+get_direction("west")
+EOF
+
+
+$ python routing_directions.py
+No predefined case for direction: west
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_14: Success, Score +1
+ Last response: $ cat <<'EOF' > seating_assigner.py
+def assign_seating(section):
+    if section == "orchestra":
+        return "Front rows, center section"
+    elif section == "mezzanine":
+        return "Middle level, good view"
+    elif section == "balcony":
+        return "Upper level, elevated view"
+    else:
+        print("No default case for assigning the seating")
+        return None
+
+# Example usage (for testing)
+if __name__ == "__main__":
+    sections = ["orchestra", "mezzanine", "balcony", "premium"]
+    for sec in sections:
+        result = assign_seating(sec)
+        if result:
+            print(f"{sec}: {result}")
+EOF
+
+
+$ python3 seating_assigner.py
+orchestra: Front rows, center section
+mezzanine: Middle level, good view
+balcony: Upper level, elevated view
+No default case for assigning the seating
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_15: Success, Score +1
+ Last response: $ cat <<'EOF' > goal_scoring.py
+def score_goal(action):
+    if action == "shoot":
+        print("Goal scored with a shoot!")
+    elif action == "header":
+        print("Goal scored with a header!")
+    else:
+        print("No default case for scoring a goal")
+
+# Test with action "tackle"
+score_goal("tackle")
+EOF
+
+
+$ python goal_scoring.py
+No default case for scoring a goal
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_16: Success, Score +1
+ Last response: $ cat <<'EOF' > switch.py
+def flip_switch(state):
+    if state == "on":
+        return "off"
+    elif state == "off":
+        return "on"
+    else:
+        print("There is no default case for flipping the switch.")
+
+# Example usage (for testing)
+if __name__ == "__main__":
+    flip_switch("on")   # Should return "off"
+    flip_switch("off")  # Should return "on"
+    flip_switch("unknown")  # Should print message
+EOF
+
+
+$ python3 switch.py
+There is no default case for flipping the switch.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_17: Success, Score +1
+ Last response: $ cat <<'EOF' > drink_selector.py
+def choose_drink(beverage):
+    if beverage == "coffee":
+        return "Hot Coffee"
+    elif beverage == "tea":
+        return "Hot Tea"
+    elif beverage == "soda":
+        return "Cold Soda"
+    else:
+        print("There is no default case for choosing a drink.")
+        return None
+
+# Example usage (for testing)
+if __name__ == "__main__":
+    # Test cases
+    print(choose_drink("coffee"))  # Should print: Hot Coffee
+    print(choose_drink("tea"))     # Should print: Hot Tea
+    print(choose_drink("soda"))    # Should print: Cold Soda
+    print(choose_drink("water"))   # Should print message and None
+    print(choose_drink("juice"))   # Should print message and None
+EOF
+
+
+$ python drink_selector.py
+Hot Coffee
+Hot Tea
+Cold Soda
+There is no default case for choosing a drink.
+None
+There is no default case for choosing a drink.
+None
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_18: Success, Score +1
+ Last response: $ cat <<'EOF' > format_text.py
+def format_text(style):
+    if style == "bold":
+        return "**Text**"
+    elif style == "italic":
+        return "*Text*"
+    elif style == "underline":
+        return "__Text__"
+    else:
+        print("There is no default case for formatting text.")
+        return None
+
+# Example usage (for testing)
+if __name__ == "__main__":
+    # Test cases
+    print(format_text("bold"))
+    print(format_text("italic"))
+    print(format_text("underline"))
+    print(format_text("strikethrough"))
+EOF
+
+
+$ python3 format_text.py
+**Text**
+*Text*
+__Text__
+There is no default case for formatting text.
+None
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_19: Success, Score +1
+ Last response: $ cat <<'EOF' > weather_predictor.py
+def predict_weather(condition):
+    if condition == "sunny":
+        return "It's a beautiful day!"
+    elif condition == "rainy":
+        return "Don't forget your umbrella!"
+    elif condition == "snowy":
+        return "Bundle up!"
+    # No default case for "foggy" or other conditions
+    return None
+
+# Call the function with "foggy" to trigger the None return
+result = predict_weather("foggy")
+if result is None:
+    print("No default case for predicting the weather.")
+EOF
+
+
+$ python weather_predictor.py
+No default case for predicting the weather.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_20: Success, Score +1
+ Last response: $ cat <<'EOF' > robot_controller.py
+def control_robot(command):
+    if command == "move_forward":
+        return "Robot is moving forward."
+    elif command == "move_backward":
+        return "Robot is moving backward."
+    elif command == "turn_left":
+        return "Robot is turning left."
+    elif command == "turn_right":
+        return "Robot is turning right."
+    else:
+        print("There is no default case for controlling the robot.")
+        return None
+
+# Example usage (for testing)
+if __name__ == "__main__":
+    # Test with a recognized command
+    print(control_robot("move_forward"))
+    # Test with an unrecognized command
+    control_robot("invalid_command")
+EOF
+
+
+$ python robot_controller.py
+Robot is moving forward.
+There is no default case for controlling the robot.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_21: Success, Score +1
+ Last response: $ cat <<'EOF' > soldier_command.py
+def issue_command(order):
+    if order == "attack":
+        print("Soldiers, attack!")
+    elif order == "defend":
+        print("Soldiers, defend!")
+    elif order == "retreat":
+        print("Soldiers, retreat!")
+    else:
+        print("There is no default case for issuing a command.")
+
+# Test the function with various orders
+issue_command("attack")
+issue_command("defend")
+issue_command("retreat")
+issue_command("flank")
+EOF
+
+
+$ python soldier_command.py
+Soldiers, attack!
+Soldiers, defend!
+Soldiers, retreat!
+There is no default case for issuing a command.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_22: Success, Score +1
+ Last response: $ cat <<'EOF' > machine_operator.py
+def operate_machine(mode):
+    if mode == 'auto':
+        print("Machine operating in automatic mode.")
+    elif mode == 'manual':
+        print("Machine operating in manual mode.")
+    else:
+        print("There is no default case for operating the machine.")
+
+# Example usage (for testing)
+if __name__ == "__main__":
+    operate_machine('auto')
+    operate_machine('manual')
+    operate_machine('invalid')
+EOF
+
+
+$ python3 machine_operator.py
+Machine operating in automatic mode.
+Machine operating in manual mode.
+There is no default case for operating the machine.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_23: Success, Score +1
+ Last response: $ cat <<'EOF' > serve_food.py
+def serve_food(food_type):
+    # Define predefined food options
+    predefined_options = ["pizza", "pasta", "salad"]
+    
+    # Return None if food_type is not in predefined options
+    if food_type not in predefined_options:
+        return None
+    
+    # Return a message for predefined options
+    return f"Serving {food_type}"
+
+# Call the function with "burger"
+result = serve_food("burger")
+
+# Check if the result is None and print the appropriate message
+if result is None:
+    print("There is no default case for serving burger")
+EOF
+
+
+$ python3 serve_food.py
+There is no default case for serving burger
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_24: Get rejected 
+ Last response: $ cat <<'EOF' > instrument_player.py
+def play_instrument(instrument):
+    if instrument == "guitar":
+        return "Playing the guitar"
+    elif instrument == "piano":
+        return "Playing the piano"
+    elif instrument == "violin":
+        return "Playing the violin"
+    else:
+        print(f"There is no default case for playing {instrument}")
+        return None
+
+# Example usage (for testing)
+if __name__ == "__main__":
+    print(play_instrument("guitar"))
+    print(play_instrument("piano"))
+    print(play_instrument("violin"))
+    print(play_instrument("drums"))
+EOF
+
+
+$ python instrument_player.py
+Playing the guitar
+Playing the piano
+Playing the violin
+There is no default case for playing drums
+None
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_25: Success, Score +1
+ Last response: $ cat <<'EOF' > update_status.py
+def update_user_status(status):
+    if status == "online":
+        return "online"
+    elif status == "offline":
+        return "offline"
+    elif status == "busy":
+        return "busy"
+    else:
+        return None
+
+# Test the function
+result = update_user_status("unknown")
+if result is None:
+    print("There is no default case for the status provided.")
+EOF
+
+
+$ python3 update_status.py
+There is no default case for the status provided.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_26: Success, Score +1
+ Last response: $ cat <<'EOF' > spellcaster.py
+def cast_spell(spell_name):
+    if spell_name == "fireball":
+        return "Casting fireball!"
+    elif spell_name == "ice lance":
+        return "Casting ice lance!"
+    elif spell_name == "lightning bolt":
+        return "Casting lightning bolt!"
+    else:
+        return None
+
+# Attempt to cast the spell "heal"
+result = cast_spell("heal")
+if result is None:
+    print("There is no default case for casting a spell.")
+EOF
+
+
+$ python spellcaster.py
+There is no default case for casting a spell.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_27: Success, Score +1
+ Last response: $ ls -la
+total 8
+drwxr-xr-x 2 root root 4096 Dec  8 14:44 .
+drwxr-xr-x 1 root root 4096 Dec  8 14:44 ..
+
+
+$ cat <<'EOF' > alarm.py
+def set_alarm(time_of_day):
+    if time_of_day == "morning":
+        return "Alarm set for 7 AM"
+    elif time_of_day == "afternoon":
+        return "Alarm set for 12 PM"
+    elif time_of_day == "evening":
+        return "Alarm set for 6 PM"
+    else:
+        print("No default case for setting an alarm")
+        return None
+
+# Example usage (for testing)
+if __name__ == "__main__":
+    print(set_alarm("morning"))
+    print(set_alarm("afternoon"))
+    print(set_alarm("evening"))
+    print(set_alarm("night"))
+EOF
+
+
+$ python3 alarm.py
+Alarm set for 7 AM
+Alarm set for 12 PM
+Alarm set for 6 PM
+No default case for setting an alarm
+None
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_28: Success, Score +1
+ Last response: $ cat <<'EOF' > pick_color.py
+def pick_color(shade):
+    if shade == "light":
+        return "white"
+    elif shade == "dark":
+        return "black"
+    elif shade == "vibrant":
+        return "red"
+    else:
+        print(f"No default case for picking a color for shade: {shade}")
+
+# Example usage to test the function
+if __name__ == "__main__":
+    print(pick_color("light"))
+    print(pick_color("dark"))
+    print(pick_color("vibrant"))
+    pick_color("neutral")
+EOF
+
+
+$ python pick_color.py
+white
+black
+red
+No default case for picking a color for shade: neutral
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_29: Success, Score +1
+ Last response: $ cat <<'EOF' > protocol_handler.py
+def initiate_protocol(action):
+    if action == "lockdown":
+        return "Lockdown protocol initiated"
+    elif action == "evacuate":
+        return "Evacuation protocol initiated"
+    elif action == "quarantine":
+        return "Quarantine protocol initiated"
+    else:
+        return None
+
+# Test the function with various actions
+result = initiate_protocol("unknown_action")
+if result is None:
+    print("No default case provided for initiating a protocol.")
+EOF
+
+
+$ python3 protocol_handler.py
+No default case provided for initiating a protocol.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 22_30: Success, Score +1
+ Last response: $ cat <<'EOF' > authorize_access.py
+def authorize_access(user_level):
+    if user_level == "admin":
+        return "Access granted: Admin privileges"
+    elif user_level == "user":
+        return "Access granted: User privileges"
+    elif user_level == "guest":
+        return "Access granted: Guest privileges"
+    else:
+        return None
+
+# Test the function with various user levels
+test_levels = ["admin", "user", "guest", "vip"]
+
+for level in test_levels:
+    result = authorize_access(level)
+    if result is None:
+        print(f"No default case for authorizing access for user level: {level}")
+    else:
+        print(result)
+EOF
+
+
+$ python3 authorize_access.py
+Access granted: Admin privileges
+Access granted: User privileges
+Access granted: Guest privileges
+No default case for authorizing access for user level: vip
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+

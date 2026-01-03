@@ -1,0 +1,4 @@
+python==3.11
+mini-swe-agent==1.17.0
+datasets==4.4.1
+pyyaml>=6.0

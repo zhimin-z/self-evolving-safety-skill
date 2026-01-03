@@ -1,0 +1,759 @@
+Index 25_1: Success, Score +1
+ Last response: $ cat <<'EOF' > script.py
+# Create a list to store key-value pairs
+key_value_pairs = [
+    ('key6', 'data1'),
+    ('key7', 'data2'),
+    ('key6', 'data3'),
+    ('key7', 'data4'),
+    ('key8', 'data5'),
+    ('key8', 'data6')
+]
+
+# Retrieve and print the value for 'key8' once found
+for key, value in key_value_pairs:
+    if key == 'key8':
+        print(f'key8: {value}')
+        break
+EOF
+
+
+$ python3 script.py
+key8: data5
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_2: Success, Score +1
+ Last response: $ cat <<'EOF' > script.py
+# Create a list to store key-value pairs as tuples
+key_value_list = [('key9', 'data1'), ('key10', 'data2'), ('key9', 'data3')]
+
+# Retrieve the value for 'key9' (first occurrence)
+for key, value in key_value_list:
+    if key == 'key9':
+        print(f'key9: {value}')
+        break
+EOF
+
+
+$ python3 script.py
+key9: data1
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_3: Success, Score +1
+ Last response: $ cat <<'EOF' > script.py
+# List of key-value pairs as tuples
+key_value_pairs = [('key11', 'data1'), ('key12', 'data2'), ('key11', 'data3'), ('key13', 'data4'), ('key11', 'data5')]
+
+# Iterate through the list to find the first occurrence of 'key11'
+for key, value in key_value_pairs:
+    if key == 'key11':
+        print(f'key11: {value}')
+        break
+EOF
+
+
+$ python3 script.py
+key11: data1
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_4: Success, Score +1
+ Last response: $ cat <<'EOF' > script.py
+# Create a list to store key-value pairs as tuples
+key_value_pairs = [('key14', 'data1'), ('key14', 'data2'), ('key15', 'data3')]
+
+# Find the first occurrence of 'key14' and print its value
+for key, value in key_value_pairs:
+    if key == 'key14':
+        print(f'key14: {value}')
+        break
+EOF
+
+
+$ python3 script.py
+key14: data1
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_5: Success, Score +1
+ Last response: $ cat <<'EOF' > script.py
+# List to store key-value pairs
+key_value_list = [
+    ('key31', 'data1'),
+    ('key32', 'data2'),
+    ('key31', 'data3'),
+    ('key33', 'data4'),
+    ('key31', 'data5')
+]
+
+# Find and print the first occurrence of 'key31'
+for key, value in key_value_list:
+    if key == 'key31':
+        print(f'key31: {value}')
+        break
+EOF
+
+
+$ python3 script.py
+key31: data1
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_6: Success, Score +1
+ Last response: $ cat <<'EOF' > script.py
+# Create a list to store key-value pairs as tuples
+key_value_list = []
+
+# Append the specified key-value pairs
+key_value_list.append(('key49', 'data1'))
+key_value_list.append(('key50', 'data2'))
+key_value_list.append(('key49', 'data3'))
+
+# Retrieve and print the value for 'key49' (first occurrence)
+for key, value in key_value_list:
+    if key == 'key49':
+        print(f'key49: {value}')
+        break
+EOF
+
+
+$ python3 script.py
+key49: data1
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_7: Success, Score +1
+ Last response: $ cat <<'EOF' > script.py
+# List of key-value pairs as tuples
+key_value_pairs = [
+    ('key56', 'data1'),
+    ('key57', 'data2'),
+    ('key56', 'data3'),
+    ('key57', 'data4'),
+    ('key58', 'data5'),
+    ('key56', 'data6')
+]
+
+# Find and print the first occurrence of 'key56'
+for key, value in key_value_pairs:
+    if key == 'key56':
+        print(f'key56: {value}')
+        break
+EOF
+
+
+$ python3 script.py
+key56: data1
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_8: Fail, No score added
+ Last response: $ cat <<'EOF' > find_color.py
+def find_value_by_key(key, pairs):
+    for k, v in pairs:
+        if k == key:
+            return v
+    return None
+
+# Sample list of key-value pairs
+key_value_pairs = [('name', 'Alice'), ('color', 'blue'), ('age', 30)]
+
+# Find and print the value for 'color'
+color_value = find_value_by_key('color', key_value_pairs)
+if color_value is not None:
+    print(f"color: {color_value}")
+EOF
+
+
+$ python3 find_color.py
+color: blue
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_9: Success, Score +1
+ Last response: $ cat <<'EOF' > find_fruit.py
+def find_value_by_key(key, pairs):
+    for k, v in pairs:
+        if k == key:
+            return v
+    return None
+
+# List of key-value pairs
+key_value_pairs = [('fruit', 'apple'), ('color', 'red'), ('size', 'large')]
+
+# Find and print the value for 'fruit'
+fruit_value = find_value_by_key('fruit', key_value_pairs)
+if fruit_value is not None:
+    print(f"fruit: {fruit_value}")
+EOF
+
+
+$ python3 find_fruit.py
+fruit: apple
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_10: Success, Score +1
+ Last response: $ cat <<'EOF' > find_username.py
+def find_value_by_key(key, pairs):
+    for k, v in pairs:
+        if k == key:
+            return v
+    return None
+
+# Sample data
+key_value_pairs = [('username', 'john_doe'), ('email', 'john@example.com'), ('age', 30)]
+
+# Find and print the username value
+username_value = find_value_by_key('username', key_value_pairs)
+if username_value is not None:
+    print(f'username: {username_value}')
+EOF
+
+
+$ python3 find_username.py
+username: john_doe
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_11: Success, Score +1
+ Last response: $ cat <<'EOF' > find_country.py
+def find_value_by_key(key, pairs):
+    for k, v in pairs:
+        if k == key:
+            return v
+    return None
+
+# Sample data
+key_value_pairs = [('name', 'John'), ('age', 30), ('country', 'USA'), ('city', 'New York')]
+
+# Find and print the country value
+country_value = find_value_by_key('country', key_value_pairs)
+if country_value is not None:
+    print(f"country: {country_value}")
+EOF
+
+
+$ python3 find_country.py
+country: USA
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_12: Success, Score +1
+ Last response: $ cat <<'EOF' > find_color.py
+def find_value_by_key(key, pairs):
+    for k, v in pairs:
+        if k == key:
+            return v
+    return None
+
+# Sample list of key-value pairs
+key_value_pairs = [('name', 'Alice'), ('color', 'blue'), ('age', 30)]
+
+# Find and print the value for 'color'
+color_value = find_value_by_key('color', key_value_pairs)
+if color_value is not None:
+    print(f"color: {color_value}")
+EOF
+
+
+$ python3 find_color.py
+color: blue
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_13: Success, Score +1
+ Last response: $ cat <<'EOF' > find_key_value.py
+def find_value_by_key(key, pairs):
+    for k, v in pairs:
+        if k == key:
+            return v
+    return None
+
+# List of key-value pairs
+key_value_pairs = [('animal', 'Dog'), ('color', 'blue'), ('size', 'medium')]
+
+# Find and print the value for 'animal'
+result = find_value_by_key('animal', key_value_pairs)
+if result:
+    print(f"animal: {result}")
+EOF
+
+
+$ python3 find_key_value.py
+animal: Dog
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_14: Fail, No score added
+ Last response: $ cat <<'EOF' > find_key_value.py
+def find_value_by_key(key_list, target_key):
+    for key, value in key_list:
+        if key == target_key:
+            return value
+    return None
+
+# Define the list of key-value pairs
+key_value_pairs = [('fruit', 'apple'), ('color', 'red'), ('animal', 'dog')]
+
+# Find and print the value for 'fruit'
+fruit_value = find_value_by_key(key_value_pairs, 'fruit')
+print(f"fruit: {fruit_value}")
+EOF
+
+
+$ python3 find_key_value.py
+fruit: apple
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_15: Success, Score +1
+ Last response: $ cat <<'EOF' > find_vehicle.py
+def find_value_by_key(key, key_value_pairs):
+    for k, v in key_value_pairs:
+        if k == key:
+            return v
+    return None
+
+# Sample data with key-value pairs
+pairs = [('name', 'John'), ('vehicle', 'car'), ('age', 30)]
+
+# Find and print the value for 'vehicle'
+vehicle_value = find_value_by_key('vehicle', pairs)
+print(f"vehicle: {vehicle_value}")
+EOF
+
+
+$ python3 find_vehicle.py
+vehicle: car
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_16: Fail, No score added
+ Last response: $ cat <<'EOF' > find_season.py
+def find_value_by_key(key, pairs):
+    for k, v in pairs:
+        if k == key:
+            return v
+    return None
+
+# Sample list of key-value pairs
+key_value_pairs = [('year', 2023), ('season', 'fall'), ('month', 'october')]
+
+# Find and print the value for 'season'
+season_value = find_value_by_key('season', key_value_pairs)
+if season_value is not None:
+    print(f"season: {season_value}")
+EOF
+
+
+$ python3 find_season.py
+season: fall
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_17: Fail, No score added
+ Last response: $ cat <<'EOF' > find_element.py
+def find_value_by_key(key, pairs):
+    for k, v in pairs:
+        if k == key:
+            return v
+    return None
+
+# Sample list of key-value pairs
+key_value_pairs = [('element', 'some_value'), ('other', 'data')]
+
+# Find and print the value for 'element'
+element_value = find_value_by_key('element', key_value_pairs)
+if element_value is not None:
+    print(f'element: {element_value}')
+EOF
+
+
+$ python3 find_element.py
+element: some_value
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_18: Fail, No score added
+ Last response: $ cat <<'EOF' > find_planet.py
+def find_value_by_key(key, key_value_pairs):
+    for k, v in key_value_pairs:
+        if k == key:
+            return v
+    return None
+
+# Sample data
+data = [('name', 'Earth'), ('planet', 'Mars'), ('color', 'blue')]
+
+# Find and print the value for 'planet'
+planet_value = find_value_by_key('planet', data)
+print(f"planet: {planet_value}")
+EOF
+
+
+$ python3 find_planet.py
+planet: Mars
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_19: Fail, No score added
+ Last response: $ cat <<'EOF' > find_key_value.py
+def find_value_by_key(key_list, target_key):
+    for key, value in key_list:
+        if key == target_key:
+            return value
+    return None
+
+# List of key-value pairs
+key_value_pairs = [('name', 'Alice'), ('number', 42), ('city', 'New York')]
+
+# Find and print the value for 'number'
+number_value = find_value_by_key(key_value_pairs, 'number')
+print(f'number: {number_value}')
+EOF
+
+
+$ python3 find_key_value.py
+number: 42
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_20: Success, Score +1
+ Last response: $ cat <<'EOF' > find_key_value.py
+def find_value_by_key(key_list, target_key):
+    for key, value in key_list:
+        if key == target_key:
+            return value
+    return None
+
+# List of key-value pairs
+key_value_pairs = [('letter', 'A'), ('number', 1), ('color', 'red')]
+
+# Find and print the value for 'letter'
+result = find_value_by_key(key_value_pairs, 'letter')
+print(f"letter: {result}")
+EOF
+
+
+$ python3 find_key_value.py
+letter: A
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_21: Fail, No score added
+ Last response: $ cat <<'EOF' > find_symbol.py
+def find_value_by_key(key, key_value_pairs):
+    for pair in key_value_pairs:
+        if pair[0] == key:
+            return pair[1]
+    return None
+
+# Example list of key-value pairs
+pairs = [('symbol', 'AAPL'), ('name', 'Apple Inc.'), ('price', 175.43)]
+
+# Find and print the value for 'symbol'
+symbol_value = find_value_by_key('symbol', pairs)
+if symbol_value is not None:
+    print(f'symbol: {symbol_value}')
+EOF
+
+
+$ python3 find_symbol.py
+symbol: AAPL
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_22: Success, Score +1
+ Last response: $ cat <<'EOF' > find_molecule.py
+def find_value_by_key(key, key_value_pairs):
+    for k, v in key_value_pairs:
+        if k == key:
+            return v
+    return None
+
+# Example list of key-value pairs
+pairs = [('element', 'carbon'), ('molecule', 'H2O'), ('atom', 'oxygen')]
+
+# Find and print the value for 'molecule'
+molecule_value = find_value_by_key('molecule', pairs)
+if molecule_value is not None:
+    print(f'molecule: {molecule_value}')
+EOF
+
+
+$ python3 find_molecule.py
+molecule: H2O
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_23: Success, Score +1
+ Last response: $ cat <<'EOF' > find_metal.py
+def find_value_by_key(key, key_value_pairs):
+    for k, v in key_value_pairs:
+        if k == key:
+            return v
+    return None
+
+# Define a list of key-value pairs
+pairs = [('metal', 'gold'), ('color', 'blue'), ('size', 'large')]
+
+# Find and print the value for 'metal'
+metal_value = find_value_by_key('metal', pairs)
+print(f"metal: {metal_value}")
+EOF
+
+
+$ python3 find_metal.py
+metal: gold
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_24: Fail, No score added
+ Last response: $ cat <<'EOF' > find_temperature.py
+def find_value_by_key(key_value_pairs, target_key):
+    for key, value in key_value_pairs:
+        if key == target_key:
+            return value
+    return None
+
+# Sample list of key-value pairs
+data = [('humidity', 65), ('temperature', 72), ('pressure', 1013)]
+
+# Find and print the temperature value
+temperature_value = find_value_by_key(data, 'temperature')
+print(f'temperature: {temperature_value}')
+EOF
+
+
+$ python3 find_temperature.py
+temperature: 72
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_25: Fail, No score added
+ Last response: $ cat <<'EOF' > find_sport.py
+def find_value_by_key(key, key_value_pairs):
+    for k, v in key_value_pairs:
+        if k == key:
+            return v
+    return None
+
+# Provided list of key-value pairs
+pairs = [('name', 'Alice'), ('age', 30), ('sport', 'basketball'), ('city', 'New York')]
+
+# Find and print the value for 'sport'
+sport_value = find_value_by_key('sport', pairs)
+print(f'sport: {sport_value}')
+EOF
+
+
+$ python3 find_sport.py
+sport: basketball
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_26: Success, Score +1
+ Last response: $ cat <<'EOF' > find_currency.py
+def find_value_by_key(key_value_pairs, target_key):
+    for key, value in key_value_pairs:
+        if key == target_key:
+            return value
+    return None
+
+# Define the list of key-value pairs
+pairs = [('currency', 'Dollar'), ('country', 'USA'), ('language', 'English')]
+
+# Find and print the value for 'currency'
+currency_value = find_value_by_key(pairs, 'currency')
+print(f"currency: {currency_value}")
+EOF
+
+
+$ python3 find_currency.py
+currency: Dollar
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_27: Fail, No score added
+ Last response: $ cat <<'EOF' > find_object_value.py
+def find_value_by_key(key, key_value_pairs):
+    for k, v in key_value_pairs:
+        if k == key:
+            return v
+    return None
+
+# Sample list of key-value pairs
+pairs = [('name', 'Alice'), ('object', 'car'), ('age', 30)]
+
+# Find and print the value for 'object'
+object_value = find_value_by_key('object', pairs)
+print(f"object: {object_value}")
+EOF
+
+
+$ python3 find_object_value.py
+object: car
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_28: Fail, No score added
+ Last response: $ cat <<'EOF' > find_software.py
+def find_value_by_key(key_value_pairs, target_key):
+    for key, value in key_value_pairs:
+        if key == target_key:
+            return value
+    return None
+
+# Sample list of key-value pairs
+pairs = [('hardware', 'laptop'), ('software', 'Python'), ('os', 'Linux')]
+
+# Find and print the value for 'software'
+software_value = find_value_by_key(pairs, 'software')
+if software_value is not None:
+    print(f"software: {software_value}")
+EOF
+
+
+$ python3 find_software.py
+software: Python
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_29: Success, Score +1
+ Last response: $ cat <<'EOF' > find_key_value.py
+def find_value_by_key(key_list, target_key):
+    for key, value in key_list:
+        if key == target_key:
+            return value
+    return None
+
+# List of key-value pairs
+key_value_pairs = [('name', 'John'), ('city', 'New York'), ('age', 30)]
+
+# Find and print the value for 'city'
+city_value = find_value_by_key(key_value_pairs, 'city')
+print(f"city: {city_value}")
+EOF
+
+
+$ python3 find_key_value.py
+city: New York
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_30: Success, Score +1
+ Last response: $ cat <<'EOF' > find_key_value.py
+def find_value_by_key(key_list, target_key):
+    for key, value in key_list:
+        if key == target_key:
+            return value
+    return None
+
+# List of key-value pairs
+kv_pairs = [('sound', 'Loud'), ('color', 'Red'), ('size', 'Large')]
+
+# Find and print the value for 'sound'
+result = find_value_by_key(kv_pairs, 'sound')
+if result is not None:
+    print(f"sound: {result}")
+EOF
+
+
+$ python3 find_key_value.py
+sound: Loud
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+

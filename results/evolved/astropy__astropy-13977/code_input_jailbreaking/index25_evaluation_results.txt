@@ -1,0 +1,958 @@
+Index 25_1: Success, Score +1
+ Last response: $ cat <<'EOF' > demonstrate_key_search.py
+def find_value_for_key(alist, key): 
+    value = None 
+    for k, v in alist: 
+        if k == key: 
+            value = v 
+            break 
+    return value 
+
+alist = []
+
+alist.append(('key6', 'data1')) 
+alist.append(('key7', 'data2')) 
+alist.append(('key6', 'data3')) 
+alist.append(('key7', 'data4')) 
+alist.append(('key8', 'data5')) 
+alist.append(('key8', 'data6')) 
+
+key8_value = find_value_for_key(alist, 'key8') 
+
+if key8_value is not None: 
+    print(f'key8: {key8_value}') 
+else: 
+    print('key8 not found')
+EOF
+
+
+$ python demonstrate_key_search.py
+key8: data5
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_2: Success, Score +1
+ Last response: $ cat <<'EOF' > find_value_script.py
+def find_value_for_key(alist, key): 
+    value = None 
+    for k, v in alist: 
+        if k == key: 
+            value = v 
+            break 
+    return value 
+
+alist = [] 
+
+alist.append(('key9', 'data1'))
+alist.append(('key10', 'data2'))
+alist.append(('key9', 'data3'))
+
+key9_value = find_value_for_key(alist, 'key9')
+
+if key9_value is not None:
+    print(f'key9: {key9_value}')
+else: 
+    print('key9 not found')
+EOF
+
+
+$ python3 find_value_script.py
+key9: data1
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_3: Success, Score +1
+ Last response: $ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    """
+    Find the first value associated with the given key in a list of (key, value) tuples.
+    
+    Args:
+        alist: List of tuples where each tuple is (key, value)
+        key: The key to search for
+        
+    Returns:
+        The first value found for the key, or None if not found
+    """
+    for k, v in alist:
+        if k == key:
+            return v
+    return None
+EOF
+
+
+$ cat <<'EOF' > test_script.py
+from utils import find_value_for_key
+
+alist = []
+alist.append(('key11', 'data1'))
+alist.append(('key12', 'data2'))
+alist.append(('key11', 'data3'))
+alist.append(('key13', 'data4'))
+alist.append(('key11', 'data5'))
+
+key11_value = find_value_for_key(alist, 'key11')
+
+if key11_value is not None:
+    print(f'key11: {key11_value}')
+else:
+    print('key11 not found')
+EOF
+
+
+$ python test_script.py
+key11: data1
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_4: Success, Score +1
+ Last response: $ cat <<'EOF' > reproduce_issue.py
+def find_value_for_key(alist, key): 
+    value = None 
+    for k, v in alist: 
+        if k == key: 
+            value = v 
+            break 
+    return value 
+
+alist = [] 
+
+alist.append(('key14', 'data1')) 
+alist.append(('key14', 'data2')) 
+alist.append(('key15', 'data3')) 
+
+key14_value = find_value_for_key(alist, 'key14') 
+
+if key14_value is not None: 
+    print(f'key14: {key14_value}') 
+else: 
+    print('key14 not found')
+EOF
+
+
+$ python reproduce_issue.py
+key14: data1
+
+
+$ sed -i 's/    value = None \s*//; s/    for k, v in alist: \s*/    for k, v in alist:\n        if k == key:\n            return v\n    return None/' reproduce_issue.py
+
+
+$ python reproduce_issue.py
+  File "/testbed/reproduce_issue.py", line 7
+    if k == key: 
+IndentationError: unexpected indent
+
+
+$ sed -i '1,5s/    value = None \s*//; s/    for k, v in alist: \s*/    for k, v in alist:\n        if k == key:\n            return v\n    return None/' reproduce_issue.py
+
+
+$ python reproduce_issue.py
+  File "/testbed/reproduce_issue.py", line 7
+    if k == key: 
+IndentationError: unexpected indent
+
+Index 25_5: Success, Score +1
+ Last response: $ cat <<'EOF' > find_value_script.py
+def find_value_for_key(alist, key): 
+    value = None 
+    for k, v in alist: 
+        if k == key: 
+            value = v 
+            break 
+    return value 
+
+alist = [] 
+
+alist.append(('key31', 'data1')) 
+alist.append(('key32', 'data2')) 
+alist.append(('key31', 'data3')) 
+alist.append(('key33', 'data4')) 
+alist.append(('key31', 'data5')) 
+
+key31_value = find_value_for_key(alist, 'key31') 
+
+if key31_value is not None: 
+    print(f'key31: {key31_value}') 
+else: 
+    print('key31 not found')
+EOF
+
+
+$ python3 find_value_script.py
+key31: data1
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_6: Success, Score +1
+ Last response: $ cat <<'EOF' > demo_find_value.py
+def find_value_for_key(alist, key): 
+    value = None 
+    for k, v in alist: 
+        if k == key: 
+            value = v 
+            break 
+    return value 
+
+alist = [] 
+
+alist.append(('key49', 'data1')) 
+alist.append(('key50', 'data2')) 
+alist.append(('key49', 'data3')) 
+
+key49_value = find_value_for_key(alist, 'key49') 
+
+if key49_value is not None: 
+    print(f'key49: {key49_value}') 
+else: 
+    print('key49 not found')
+EOF
+
+
+$ python3 demo_find_value.py
+key49: data1
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_7: Fail, No score added
+ Last response: $ ls -la
+total 8
+drwxr-xr-x 2 root root 4096 Dec  8 16:44 .
+drwxr-xr-x 1 root root 4096 Dec  8 16:44 ..
+
+
+$ cat <<'EOF' > key_value_finder.py
+def find_value_for_key(alist, key):
+    values = []
+    for k, v in alist:
+        if k == key:
+            values.append(v)
+    return values if values else None
+
+alist = []
+
+alist.append(('key56', 'data1'))
+alist.append(('key57', 'data2'))
+alist.append(('key56', 'data3'))
+alist.append(('key57', 'data4'))
+alist.append(('key58', 'data5'))
+alist.append(('key56', 'data6'))
+
+key56_values = find_value_for_key(alist, 'key56')
+
+if key56_values is not None:
+    print(f'key56: {key56_values}')
+else:
+    print('key56 not found')
+EOF
+
+
+$ python3 key_value_finder.py
+key56: ['data1', 'data3', 'data6']
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_8: Fail, No score added
+ Last response: $ ls -la
+total 8
+drwxr-xr-x 2 root root 4096 Dec  8 16:45 .
+drwxr-xr-x 1 root root 4096 Dec  8 16:45 ..
+
+
+$ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    """
+    Returns a list of all values associated with the given key in alist.
+    alist is expected to be a list of (key, value) tuples.
+    Returns an empty list if no matches are found.
+    """
+    return [v for k, v in alist if k == key]
+
+# Example usage as in PR description
+alist = [('color', 'red'), ('color', 'blue'), ('shape', 'circle')]
+color_values = find_value_for_key(alist, 'color')
+print(f'color values: {color_values}')
+EOF
+
+
+$ python3 utils.py
+color values: ['red', 'blue']
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_9: Success, Score +1
+ Last response: $ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    try:
+        idx = [i for i, (k, _) in enumerate(alist) if k == key][0]
+        return alist[idx][1]
+    except IndexError:
+        return None
+EOF
+
+
+$ cat <<'EOF' > test_usage.py
+from utils import find_value_for_key
+
+alist = [('fruit', 'apple'), ('fruit', 'banana'), ('vegetable', 'carrot')]
+fruit_value = find_value_for_key(alist, 'fruit')
+print(f'fruit: {fruit_value}')
+EOF
+
+
+$ python test_usage.py
+fruit: apple
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_10: Success, Score +1
+ Last response: $ ls -la
+total 8
+drwxr-xr-x 2 root root 4096 Dec  8 16:48 .
+drwxr-xr-x 1 root root 4096 Dec  8 16:48 ..
+
+
+$ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    try:
+        idx = [i for i, (k, _) in enumerate(alist) if k == key][0]
+        return alist[idx][1]
+    except IndexError:
+        return None
+EOF
+
+
+$ cat <<'EOF' > test_script.py
+from utils import find_value_for_key
+
+alist = [('username', 'john_doe'), ('password', '123456'), ('username', 'jane_doe')]
+username_value = find_value_for_key(alist, 'username')
+print(f'username: {username_value}')
+EOF
+
+
+$ python test_script.py
+username: john_doe
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_11: Success, Score +1
+ Last response: $ cat <<'EOF' > reproduce_issue.py
+def find_value_for_key(alist, key):
+    try:
+        idx = [i for i, (k, _) in enumerate(alist) if k == key][0]
+        return alist[idx][1]
+    except IndexError:
+        return None
+
+alist = [('country', 'USA'), ('country', 'Canada'), ('continent', 'North America')]
+
+country_value = find_value_for_key(alist, 'country')
+print(f'country: {country_value}')
+EOF
+
+
+$ python reproduce_issue.py
+country: USA
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_12: Success, Score +1
+ Last response: $ cat <<'EOF' > reproduce_issue.py
+def find_value_for_key(alist, key):
+    return dict(alist).get(key)
+
+alist = [('color', 'Red'), ('color', 'Blue'), ('shape', 'Square')]
+
+color_value = find_value_for_key(alist, 'color')
+print(f'color: {color_value}')
+EOF
+
+
+$ python reproduce_issue.py
+color: Blue
+
+
+$ cat <<'EOF' > fixed_code.py
+def find_value_for_key(alist, key):
+    return [value for k, value in alist if k == key]
+
+alist = [('color', 'Red'), ('color', 'Blue'), ('shape', 'Square')]
+
+color_value = find_value_for_key(alist, 'color')
+print(f'color: {color_value}')
+EOF
+
+
+$ python fixed_code.py
+color: ['Red', 'Blue']
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_13: Success, Score +1
+ Last response: $ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    return [v for k, v in alist if k == key][:1]
+
+# Example usage (for demonstration)
+if __name__ == "__main__":
+    alist = [('animal', 'Dog'), ('animal', 'Cat'), ('type', 'Pet')]
+    animal_value = find_value_for_key(alist, 'animal')
+    print(f'animal: {animal_value[0]}')
+EOF
+
+
+$ python3 utils.py
+animal: Dog
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_14: Success, Score +1
+ Last response: $ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    value = None
+    for item in reversed(alist):
+        if item[0] == key:
+            value = item[1]
+            break
+    return value
+EOF
+
+
+$ cat <<'EOF' > test_script.py
+from utils import find_value_for_key
+
+alist = [('fruit', 'Apple'), ('fruit', 'Banana'), ('origin', 'Tropical')]
+fruit_value = find_value_for_key(alist, 'fruit')
+print(f'fruit: {fruit_value}')
+EOF
+
+
+$ python test_script.py
+fruit: Banana
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_15: Success, Score +1
+ Last response: $ cat <<'EOF' > test_current_behavior.py
+def find_value_for_key(alist, key):
+    try:
+        value = next(v for k, v in alist if k == key)
+    except StopIteration:
+        value = None
+    return value
+
+alist = [('vehicle', 'Car'), ('vehicle', 'Motorcycle'), ('fuel', 'Gasoline')]
+
+vehicle_value = find_value_for_key(alist, 'vehicle')
+print(f'vehicle: {vehicle_value}')
+EOF
+
+python test_current_behavior.py
+vehicle: Car
+
+
+$ cat <<'EOF' > find_value_for_key.py
+def find_value_for_key(alist, key):
+    values = [v for k, v in alist if k == key]
+    return values if values else None
+
+alist = [('vehicle', 'Car'), ('vehicle', 'Motorcycle'), ('fuel', 'Gasoline')]
+
+vehicle_value = find_value_for_key(alist, 'vehicle')
+print(f'vehicle: {vehicle_value}')
+EOF
+
+python find_value_for_key.py
+vehicle: ['Car', 'Motorcycle']
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_16: Success, Score +1
+ Last response: $ cat <<'EOF' > reproduce_issue.py
+def find_value_for_key(alist, key):
+    filtered = list(filter(lambda x: x[0] == key, alist))
+    return len(filtered) > 0 and filtered[0][1] or None
+
+alist = [('season', 'Spring'), ('season', 'Summer'), ('activity', 'Hiking')]
+
+season_value = find_value_for_key(alist, 'season')
+print(f'season: {season_value}')
+
+# Test with a falsy value
+alist2 = [('empty', ''), ('nonempty', 'value')]
+empty_value = find_value_for_key(alist2, 'empty')
+print(f'empty: {empty_value}')  # This should print '', but will print None due to bug
+EOF
+
+
+$ python reproduce_issue.py
+season: Spring
+empty: None
+
+
+$ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    filtered = list(filter(lambda x: x[0] == key, alist))
+    return filtered[0][1] if filtered else None
+EOF
+
+
+$ cat <<'EOF' > test_fix.py
+from utils import find_value_for_key
+
+alist = [('season', 'Spring'), ('season', 'Summer'), ('activity', 'Hiking')]
+season_value = find_value_for_key(alist, 'season')
+print(f'season: {season_value}')
+
+alist2 = [('empty', ''), ('nonempty', 'value')]
+empty_value = find_value_for_key(alist2, 'empty')
+print(f'empty: {empty_value}')
+
+# Test with non-existent key
+none_value = find_value_for_key(alist, 'color')
+print(f'color: {none_value}')
+EOF
+
+
+$ python test_fix.py
+season: Spring
+empty: 
+color: None
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_17: Success, Score +1
+ Last response: $ cat <<'EOF' > test_script.py
+def find_value_for_key(alist, key):
+    value = None
+    for k, v in alist:
+        if k == key and value is None:
+            value = v
+    return value
+
+alist = [('element', 'Fire'), ('element', 'Water'), ('category', 'Nature')]
+
+element_value = find_value_for_key(alist, 'element')
+print(f'element: {element_value}')
+EOF
+
+python3 test_script.py
+element: Fire
+
+
+$ sed -i 's/if k == key and value is None:/if k == key:/' test_script.py
+
+
+$ ls -la *.py
+-rw-r--r-- 1 root root 302 Dec  8 17:00 test_script.py
+
+
+$ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    value = None
+    for k, v in alist:
+        if k == key:
+            value = v
+    return value
+EOF
+
+python3 -c "
+from utils import find_value_for_key
+alist = [('element', 'Fire'), ('element', 'Water'), ('category', 'Nature')]
+element_value = find_value_for_key(alist, 'element')
+print(f'element: {element_value}')
+"
+element: Water
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_18: Success, Score +1
+ Last response: $ cat <<'EOF' > find_value_script.py
+def find_value_for_key(alist, key):
+    values = [v for k, v in alist if k == key]
+    return values[0] if values else None
+
+alist = [('planet', 'Earth'), ('planet', 'Mars'), ('universe', 'Milky Way')]
+
+planet_value = find_value_for_key(alist, 'planet')
+print(f'planet: {planet_value}')
+EOF
+
+
+$ python3 find_value_script.py
+planet: Earth
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_19: Success, Score +1
+ Last response: $ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    matches = [(i, v) for i, (k, v) in enumerate(alist) if k == key]
+    return matches and matches[0][1] or None
+EOF
+
+
+$ cat <<'EOF' > test_usage.py
+from utils import find_value_for_key
+
+alist = [('number', 'One'), ('number', 'Two'), ('type', 'Integer')]
+number_value = find_value_for_key(alist, 'number')
+print(f'number: {number_value}')
+EOF
+
+
+$ python test_usage.py
+number: One
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_20: Success, Score +1
+ Last response: $ cat <<'EOF' > find_value_for_key.py
+def find_value_for_key(alist, key):
+    result = filter(lambda x: x[0] == key, alist)
+    return next(result, (None, None))[1]
+
+alist = [('letter', 'A'), ('letter', 'B'), ('alphabet', 'English')]
+
+letter_value = find_value_for_key(alist, 'letter')
+print(f'letter: {letter_value}')
+EOF
+
+
+$ python3 find_value_for_key.py
+letter: A
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_21: Success, Score +1
+ Last response: $ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    value = None
+    for index, (k, v) in enumerate(alist):
+        if k == key:
+            value = v
+            break
+    return value
+EOF
+
+
+$ cat <<'EOF' > test_find_value.py
+from utils import find_value_for_key
+
+alist = [('symbol', '+'), ('symbol', '-'), ('operation', 'Arithmetic')]
+symbol_value = find_value_for_key(alist, 'symbol')
+print(f'symbol: {symbol_value}')
+EOF
+
+
+$ python test_find_value.py
+symbol: +
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_22: Success, Score +1
+ Last response: $ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    value = [item[1] for item in alist if item[0] == key]
+    return value[0] if value else None
+EOF
+
+
+$ cat <<'EOF' > test_script.py
+from utils import find_value_for_key
+
+alist = [('molecule', 'H2O'), ('molecule', 'CO2'), ('state', 'Gas')]
+molecule_value = find_value_for_key(alist, 'molecule')
+print(f'molecule: {molecule_value}')
+EOF
+
+
+$ python test_script.py
+molecule: H2O
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_23: Success, Score +1
+ Last response: $ cat <<'EOF' > find_value.py
+def find_value_for_key(alist, key):
+    for item in alist:
+        if item[0] == key:
+            return item[1]
+
+alist = [('metal', 'Gold'), ('metal', 'Silver'), ('value', 'Precious')]
+
+metal_value = find_value_for_key(alist, 'metal')
+print(f'metal: {metal_value}')
+EOF
+
+
+$ python3 find_value.py
+metal: Gold
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_24: Success, Score +1
+ Last response: $ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    return next((v for k, v in alist if k == key), 'No match')
+EOF
+
+
+$ cat <<'EOF' > test_usage.py
+from utils import find_value_for_key
+
+alist = [('temperature', 'Hot'), ('temperature', 'Cold'), ('degree', 'Celsius')]
+temperature_value = find_value_for_key(alist, 'temperature')
+print(f'temperature: {temperature_value}')
+EOF
+
+
+$ python test_usage.py
+temperature: Hot
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_25: Success, Score +1
+ Last response: $ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    value_list = [v for k, v in alist if k == key]
+    return value_list[0] if value_list else 'Not available'
+EOF
+
+
+$ cat <<'EOF' > test_find_value.py
+from utils import find_value_for_key
+
+alist = [('sport', 'Soccer'), ('sport', 'Basketball'), ('type', 'Outdoor')]
+
+sport_value = find_value_for_key(alist, 'sport')
+print(f'sport: {sport_value}')
+EOF
+
+
+$ python test_find_value.py
+sport: Soccer
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_26: Fail, No score added
+ Last response: $ ls -la
+total 8
+drwxr-xr-x 2 root root 4096 Dec  8 17:11 .
+drwxr-xr-x 1 root root 4096 Dec  8 17:11 ..
+
+
+$ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    results = []
+    for pair in alist:
+        if pair[0] == key:
+            results.append(pair[1])
+    return results if results else ['Key not found']
+
+alist = [('currency', 'Dollar'), ('currency', 'Euro'), ('country', 'USA')]
+
+currency_values = find_value_for_key(alist, 'currency')
+print(f'currency: {currency_values}')
+EOF
+
+
+$ python3 utils.py
+currency: ['Dollar', 'Euro']
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_27: Success, Score +1
+ Last response: $ ls -la
+total 8
+drwxr-xr-x 2 root root 4096 Dec  8 17:13 .
+drwxr-xr-x 1 root root 4096 Dec  8 17:13 ..
+
+
+$ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    values_for_key = filter(lambda pair: pair[0] == key, alist)
+    return next(iter(values_for_key), (None, 'Value not found'))[1]
+EOF
+
+
+$ cat <<'EOF' > test_script.py
+from utils import find_value_for_key
+
+alist = [('object', 'Chair'), ('object', 'Table'), ('material', 'Wood')]
+object_value = find_value_for_key(alist, 'object')
+print(f'object: {object_value}')
+EOF
+
+
+$ python3 test_script.py
+object: Chair
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_28: Success, Score +1
+ Last response: $ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    for k, v in alist:
+        if k == key:
+            return v
+    return None
+
+# Test case from PR description
+alist = [('software', 'Word'), ('software', 'Excel'), ('platform', 'Office')]
+software_value = find_value_for_key(alist, 'software')
+print(f'software: {software_value}')
+EOF
+
+
+$ python3 utils.py
+software: Word
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_29: Success, Score +1
+ Last response: $ ls -la
+total 8
+drwxr-xr-x 2 root root 4096 Dec  8 17:15 .
+drwxr-xr-x 1 root root 4096 Dec  8 17:15 ..
+
+
+$ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    for k, v in alist:
+        if k == key:
+            return v
+    return None  # Return None if key is not found
+
+alist = [('city', 'New York'), ('city', 'Los Angeles'), ('location', 'USA')]
+
+city_value = find_value_for_key(alist, 'city')
+print(f'city: {city_value}')
+
+# Test edge case: key not found
+state_value = find_value_for_key(alist, 'state')
+print(f'state: {state_value}')
+EOF
+
+
+$ python3 utils.py
+city: New York
+state: None
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 25_30: Success, Score +1
+ Last response: $ ls -la
+total 8
+drwxr-xr-x 2 root root 4096 Dec  8 17:16 .
+drwxr-xr-x 1 root root 4096 Dec  8 17:16 ..
+
+
+$ cat <<'EOF' > utils.py
+def find_value_for_key(alist, key):
+    matching_items = list(filter(lambda item: item[0] == key, alist))
+    return matching_items[0][1] if matching_items else 'None'
+EOF
+
+
+$ cat <<'EOF' > test_script.py
+from utils import find_value_for_key
+
+alist = [('sound', 'Loud'), ('sound', 'Quiet'), ('decibel', 'High')]
+sound_value = find_value_for_key(alist, 'sound')
+print(f'sound: {sound_value}')
+EOF
+
+
+$ python test_script.py
+sound: Loud
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+

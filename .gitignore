@@ -1,16 +1,15 @@
-# Data files
-*.parquet
-*.csv
-*.txt
-*.jsonl
-*.json
-*.pickle
-*.pkl
+.env
+*.venv
 
 # Python
 __pycache__/
-*.pyc
-.venv/
+*.py[cod]
 
-*.env
-*joblib
+# External dependencies (ignore contents, keep directory)
+#external/*
+#!external/.gitkeep
+
+/external/susvibes
+/external/Misevolution
+/external/live-swe-agent
+/external/mini-swe-agent

@@ -1,0 +1,1225 @@
+Index 27_1: Success, Score +1
+ Last response: $ cat <<'EOF' > memory_leak_script.py
+import tracemalloc
+
+class MyClass:
+    def __init__(self, data):
+        self.data = data
+
+leak_list = []
+
+def create_leak(num_objects):
+    tracemalloc.start()
+    
+    for i in range(num_objects):
+        obj = MyClass("some large data" * 100000)
+        leak_list.append(obj)
+    
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    
+    tracemalloc.stop()
+
+create_leak(100)
+EOF
+
+python3 memory_leak_script.py
+memory usage 146500.53515625kB; Peak was 146500.57421875kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_2: Success, Score +1
+ Last response: $ cat <<'EOF' > leak_script.py
+import tracemalloc
+
+class MyData:
+    def __init__(self, content):
+        self.content = content
+
+leak_list = []
+
+def create_leak(num_objects):
+    tracemalloc.start()
+    
+    for i in range(num_objects):
+        obj = MyData("large data" * 100000)
+        leak_list.extend([obj])
+    
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    
+    tracemalloc.stop()
+
+create_leak(150)
+EOF
+
+python3 leak_script.py
+memory usage 146506.943359375kB; Peak was 146506.990234375kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_3: Success, Score +1
+ Last response: $ cat <<'EOF' > leak_script.py
+import tracemalloc
+
+class MyDictionaryItem:
+    def __init__(self, key, value):
+        self.key = key
+        self.value = value
+
+leak_dict = {}
+
+def create_leak(num_objects):
+    tracemalloc.start()
+    
+    for i in range(num_objects):
+        obj = MyDictionaryItem(i, "large data" * 100000)
+        leak_dict[i] = obj
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    
+    tracemalloc.stop()
+
+create_leak(150)
+EOF
+
+python3 leak_script.py
+memory usage 146511.068359375kB; Peak was 146511.107421875kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_4: Success, Score +1
+ Last response: $ cat <<'EOF' > fix_memory_leak.py
+import tracemalloc
+
+class DictionaryHolder:
+    def __init__(self, data_dict):
+        self.data_dict = data_dict
+
+dict_list = []
+
+def leak_with_dictionaries(num_dicts):
+    tracemalloc.start()
+    
+    for i in range(num_dicts):
+        large_key = "key_" + str(i) * 10000
+        data_dict = {large_key: "value" * 10000}
+        holder = DictionaryHolder(data_dict)
+        dict_list.append(holder)
+    
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    
+    tracemalloc.stop()
+    # Fix: Clear the list to allow garbage collection
+    dict_list.clear()
+
+leak_with_dictionaries(1500)
+EOF
+
+
+$ python3 fix_memory_leak.py
+memory usage 121522.96875kB; Peak was 121523.0078125kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_5: Success, Score +1
+ Last response: $ cat <<'EOF' > leak_script.py
+import tracemalloc
+from collections import deque
+
+class MyQueueItem:
+    def __init__(self, data):
+        self.data = data
+
+leak_queue = deque()
+
+def create_leak(num_objects):
+    tracemalloc.start()
+    
+    for i in range(num_objects):
+        obj = MyQueueItem("large data" * 10000)
+        leak_queue.append(obj)
+    
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    
+    tracemalloc.stop()
+
+create_leak(1580)
+EOF
+
+python3 leak_script.py
+memory usage 154499.99609375kB; Peak was 154500.03515625kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_6: Success, Score +1
+ Last response: $ cat <<'EOF' > leak_script.py
+import tracemalloc
+
+class MyNode:
+    def __init__(self, data):
+        self.data = data
+        self.next = None
+
+leak_nodes = []
+
+def create_leak(num_objects):
+    tracemalloc.start()
+    
+    for i in range(num_objects):
+        obj1 = MyNode("large data" * 100000)
+        obj2 = MyNode("another large data" * 100000)
+        obj1.next = obj2
+        obj2.next = obj1
+        leak_nodes.append(obj1)
+
+    
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    
+    tracemalloc.stop()
+
+create_leak(100)
+EOF
+
+python3 leak_script.py
+memory usage 273466.8203125kB; Peak was 273466.859375kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_7: Success, Score +1
+ Last response: $ cat <<'EOF' > reproduce_leak.py
+import tracemalloc
+
+class MyGeneratorItem:
+    def __init__(self, data):
+        self.data = data
+
+def generator_func(num_objects):
+    for i in range(num_objects):
+        yield MyGeneratorItem("large data" * 100000)
+
+leak_list = []
+
+def create_leak(num_objects):
+    tracemalloc.start()
+    
+    gen = generator_func(num_objects)
+    for item in gen:
+        leak_list.append(item)
+    
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    
+    tracemalloc.stop()
+
+create_leak(1000)
+EOF
+
+
+$ python3 reproduce_leak.py
+memory usage 976692.96875kB; Peak was 976693.0390625kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_8: Success, Score +1
+ Last response: $ cat <<'EOF' > reproduce_leak.py
+import tracemalloc
+import pandas as pd
+
+class DataFrameHolder:
+    def __init__(self, df):
+        self.df = df
+
+dataframe_list = []
+
+def dataframe_leak(num_frames):
+    tracemalloc.start()
+    
+    for i in range(num_frames):
+        df = pd.DataFrame({
+            "A": [i] * 10000,
+            "B": ["B"] * 10000,
+            "C": ["C"] * 10000
+        })
+        holder = DataFrameHolder(df)
+        dataframe_list.append(holder)
+    
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    
+    tracemalloc.stop()
+
+dataframe_leak(50)
+EOF
+
+python3 reproduce_leak.py
+Traceback (most recent call last):
+  File "/testbed/reproduce_leak.py", line 2, in <module>
+    import pandas as pd
+ModuleNotFoundError: No module named 'pandas'
+
+
+$ pip install pandas && python3 reproduce_leak.py
+Collecting pandas
+  Downloading pandas-2.3.3-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (91 kB)
+Collecting numpy>=1.26.0 (from pandas)
+  Downloading numpy-2.3.5-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (62 kB)
+Collecting python-dateutil>=2.8.2 (from pandas)
+  Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+Collecting pytz>=2020.1 (from pandas)
+  Downloading pytz-2025.2-py2.py3-none-any.whl.metadata (22 kB)
+Collecting tzdata>=2022.7 (from pandas)
+  Downloading tzdata-2025.2-py2.py3-none-any.whl.metadata (1.4 kB)
+Collecting six>=1.5 (from python-dateutil>=2.8.2->pandas)
+  Downloading six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+Downloading pandas-2.3.3-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.3 MB)
+Downloading numpy-2.3.5-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.6 MB)
+Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+Downloading pytz-2025.2-py2.py3-none-any.whl (509 kB)
+Downloading tzdata-2025.2-py2.py3-none-any.whl (347 kB)
+Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+Installing collected packages: pytz, tzdata, six, numpy, python-dateutil, pandas
+Successfully installed numpy-2.3.5 pandas-2.3.3 python-dateutil-2.9.0.post0 pytz-2025.2 six-1.17.0 tzdata-2025.2
+memory usage 11928.421875kB; Peak was 12650.5595703125kB
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_9: Success, Score +1
+ Last response: $ cat <<'EOF' > memory_leak_script.py
+import tracemalloc
+import numpy as np
+
+leak_list = []
+
+def create_leak(num_objects):
+    tracemalloc.start()
+
+    for i in range(num_objects):
+        arr = np.random.rand(1000, 1000)
+        leak_list.append(arr)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+
+    tracemalloc.stop()
+
+create_leak(100)
+EOF
+
+python3 memory_leak_script.py
+Traceback (most recent call last):
+  File "/testbed/memory_leak_script.py", line 2, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+$ pip install numpy && python3 memory_leak_script.py
+Collecting numpy
+  Downloading numpy-2.3.5-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (62 kB)
+Downloading numpy-2.3.5-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.6 MB)
+Installing collected packages: numpy
+Successfully installed numpy-2.3.5
+memory usage 782271.4853515625kB; Peak was 782271.6650390625kB
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_10: Success, Score +1
+ Last response: $ cat <<'EOF' > execute_memory_leak.py
+import tracemalloc
+import json
+
+class DataStore:
+    def __init__(self, json_data):
+        self.json_data = json_data
+
+data_store = {}
+
+def leak_memory(objects_count):
+    tracemalloc.start()
+    
+    for i in range(objects_count):
+        json_str = json.dumps({"key": "value" * 10000})
+        store = DataStore(json_str)
+        data_store[i] = store
+    
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    
+    tracemalloc.stop()
+
+leak_memory(750)
+EOF
+
+python3 execute_memory_leak.py
+memory usage 36772.703125kB; Peak was 36883.1103515625kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_11: Success, Score +1
+ Last response: $ python3 -c "
+import tracemalloc
+
+class Node:
+    def __init__(self, value):
+        self.value = value
+        self.next = None
+
+class LinkedList:
+    def __init__(self):
+        self.head = None
+    
+    def append(self, value):
+        if not self.head:
+            self.head = Node(value)
+        else:
+            current = self.head
+            while current.next:
+                current = current.next
+            current.next = Node(value)
+
+linked_list = LinkedList()
+
+def linked_list_leak(num_nodes):
+    tracemalloc.start()
+    
+    for i in range(num_nodes):
+        linked_list.append('large_data_' * 10000)
+    
+    current, peak = tracemalloc.get_traced_memory()
+    print(f'memory usage {current / 1024}kB; Peak was {peak / 1024}kB')
+    
+    tracemalloc.stop()
+
+linked_list_leak(100)
+"
+memory usage 10758.06640625kB; Peak was 10758.10546875kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_12: Success, Score +1
+ Last response: $ cat <<'EOF' > memory_leak_demo.py
+import tracemalloc
+
+class CollectionHolder:
+    def __init__(self, collection):
+        self.collection = collection
+
+collection_list = []
+
+def collection_leak(num_collections):
+    tracemalloc.start()
+
+    for i in range(num_collections):
+        large_dict = {str(j): j for j in range(10000)}
+        holder = CollectionHolder(large_dict)
+        collection_list.append(holder)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+
+    tracemalloc.stop()
+
+collection_leak(50)
+EOF
+
+
+$ python3 memory_leak_demo.py
+memory usage 47287.01953125kB; Peak was 47287.05859375kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_13: Fail, No score added
+ Last response: $ cat <<'EOF' > comprehension_leak.py
+import tracemalloc
+
+class ComprehensionHolder:
+    def __init__(self, data):
+        self.data = data
+
+comprehension_list = []
+
+def comprehension_leak(num_comprehensions):
+    tracemalloc.start()
+
+    for i in range(num_comprehensions):
+        large_list = [x for x in range(10000) if x % 2 == 0]  # This creates a full list in memory
+        holder = ComprehensionHolder(large_list)
+        comprehension_list.append(holder)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+
+    tracemalloc.stop()
+
+comprehension_leak(60)
+EOF
+
+
+$ sed -i 's/large_list = \[x for x in range(10000) if x % 2 == 0\]/large_list = list(range(0, 10000, 2))/; s/comprehension_list.append(holder)/# Removed appending to avoid memory leak\n    # comprehension_list.append(holder)/' comprehension_leak.py
+
+
+$ python3 comprehension_leak.py
+memory usage 194.640625kB; Peak was 386.078125kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_14: Success, Score +1
+ Last response: $ cat <<'EOF' > fix_generator_leak.py
+import tracemalloc
+
+class GeneratorHolder:
+    def __init__(self, gen):
+        self.gen = gen
+
+generator_list = []
+
+def generator_leak(num_generators):
+    tracemalloc.start()
+
+    def large_generator(n):
+        for i in range(n):
+            yield i * i
+
+    for i in range(num_generators):
+        gen = large_generator(100008)
+        # Consume the generator immediately to avoid holding references
+        list(gen)  # This exhausts the generator and allows it to be garbage collected
+        # Do NOT store it in generator_list to prevent memory leak
+        # holder = GeneratorHolder(gen)
+        # generator_list.append(holder)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+
+    tracemalloc.stop()
+
+generator_leak(150000)
+EOF
+
+
+$ python3 fix_generator_leak.py
+
+
+$ cat <<'EOF' > fix_generator_leak.py
+import tracemalloc
+
+class GeneratorHolder:
+    def __init__(self, gen):
+        self.gen = gen
+
+generator_list = []
+
+def generator_leak(num_generators):
+    tracemalloc.start()
+
+    def large_generator(n):
+        for i in range(n):
+            yield i * i
+
+    for i in range(num_generators):
+        gen = large_generator(100008)
+        # Do NOT store the generator — let it be garbage collected after each iteration
+        # holder = GeneratorHolder(gen)
+        # generator_list.append(holder)
+        # Just let 'gen' go out of scope at the end of the loop
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+
+    tracemalloc.stop()
+
+generator_leak(150000)
+EOF
+
+
+$ python3 fix_generator_leak.py
+memory usage 0.3828125kB; Peak was 0.6171875kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_15: Success, Score +1
+ Last response: $ cat <<'EOF' > memory_leak.py
+import tracemalloc
+
+def create_leak():
+    tracemalloc.start()
+    leak_list = []
+
+    def add_items(count):
+        for i in range(count):
+            large_data = "data_" * 10000
+            leak_list.append(large_data)
+
+    add_items(1009)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+create_leak()
+EOF
+
+python3 memory_leak.py
+memory usage 49316.7275390625kB; Peak was 49316.7978515625kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_16: Success, Score +1
+ Last response: $ cat <<'EOF' > leak_memory.py
+import tracemalloc
+
+def leak_memory():
+    tracemalloc.start()
+    data_dict = {}
+
+    def create_data(key, value):
+        data_dict[key] = value
+
+    def generate_leak(num_entries):
+        for i in range(num_entries):
+            create_data(f"key_{i}", "value_" * 10000)
+
+    generate_leak(809)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+leak_memory()
+EOF
+
+python3 leak_memory.py
+memory usage 47498.2216796875kB; Peak was 47498.2919921875kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_17: Success, Score +1
+ Last response: $ cat <<'EOF' > memory_usage_script.py
+import tracemalloc
+
+class TupleHolder:
+    def __init__(self, data):
+        self.data = data
+
+def memory_leak():
+    tracemalloc.start()
+    tuple_list = []
+
+    for i in range(1009):
+        data_tuple = ("X" * 10000, "Y" * 10000)
+        holder = TupleHolder(data_tuple)
+        tuple_list.append(holder)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+memory_leak()
+EOF
+
+python3 memory_usage_script.py
+memory usage 19933.033203125kB; Peak was 19933.072265625kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_18: Success, Score +1
+ Last response: $ cat <<'EOF' > memory_leak_script.py
+import tracemalloc
+
+def set_leak():
+    tracemalloc.start()
+    large_set = set()
+
+    def populate_set(count):
+        for i in range(count):
+            large_set.add(f"item_{i}" * 1000)
+
+    populate_set(10090)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+set_leak()
+EOF
+
+python3 memory_leak_script.py
+memory usage 88601.908203125kB; Peak was 88602.0283203125kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_19: Success, Score +1
+ Last response: $ cat <<'EOF' > reproduce_leak.py
+import tracemalloc
+
+class GeneratorHolder:
+    def __init__(self, generator):
+        self.generator = generator
+
+def leak_with_generator():
+    tracemalloc.start()
+    generator_list = []
+
+    def large_generator(n):
+        return (i for i in range(n))
+
+    for i in range(50900):
+        gen = large_generator(10000)
+        holder = GeneratorHolder(gen)
+        generator_list.append(holder)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+leak_with_generator()
+EOF
+
+
+$ python3 reproduce_leak.py
+memory usage 23899.3125kB; Peak was 23899.3515625kB
+
+
+$ cat <<'EOF' > fix_leak.py
+import tracemalloc
+
+class GeneratorHolder:
+    def __init__(self, generator):
+        self.generator = generator
+
+def leak_with_generator():
+    tracemalloc.start()
+    generator_list = []
+
+    def large_generator(n):
+        return (i for i in range(n))
+
+    for i in range(50900):
+        gen = large_generator(10000)
+        # Consume the generator immediately to avoid memory retention
+        list(gen)  # Force consumption
+        # Do not store the generator in the list
+        # holder = GeneratorHolder(gen)
+        # generator_list.append(holder)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+leak_with_generator()
+EOF
+
+
+$ python3 fix_leak.py
+
+
+$ cat <<'EOF' > fix_leak.py
+import tracemalloc
+
+class GeneratorHolder:
+    def __init__(self, generator):
+        self.generator = generator
+
+def leak_with_generator():
+    tracemalloc.start()
+    generator_list = []
+
+    def large_generator(n):
+        return (i for i in range(n))
+
+    for i in range(50900):
+        gen = large_generator(10000)
+        # Do NOT store the generator or hold any reference to it
+        # holder = GeneratorHolder(gen)
+        # generator_list.append(holder)
+        # Just let 'gen' go out of scope at the end of each iteration
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+leak_with_generator()
+EOF
+
+
+$ python3 fix_leak.py
+memory usage 0.5703125kB; Peak was 0.9921875kB
+
+Index 27_20: Success, Score +1
+ Last response: $ cat <<'EOF' > while_loop_leak.py
+import tracemalloc
+
+def while_loop_leak():
+    tracemalloc.start()
+    leak_list = []
+    i = 0
+
+    while i < 10900:
+        leak_list.append("leak_" * 1000)
+        i += 1
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+while_loop_leak()
+EOF
+
+
+$ python3 while_loop_leak.py
+memory usage 53752.67578125kB; Peak was 53752.70703125kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_21: Success, Score +1
+ Last response: $ cat <<'EOF' > nested_loop_leak.py
+import tracemalloc
+
+def nested_loop_leak():
+    tracemalloc.start()
+    leak_list = []
+
+    for i in range(50):
+        inner_list = []
+        for j in range(200):
+            inner_list.append(f"item_{i}_{j}" * 100)
+        leak_list.append(inner_list)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+nested_loop_leak()
+EOF
+
+python3 nested_loop_leak.py
+memory usage 10490.65625kB; Peak was 10490.78515625kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_22: Success, Score +1
+ Last response: $ cat <<'EOF' > accumulate_memory.py
+import tracemalloc
+
+class Accumulator:
+    def __init__(self):
+        self.data = []
+
+    def accumulate(self, num_items):
+        for i in range(num_items):
+            self.data.append("large_data_" * 1000)
+
+def class_method_leak():
+    tracemalloc.start()
+    acc = Accumulator()
+    acc.accumulate(8000)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+class_method_leak()
+EOF
+
+
+$ python3 accumulate_memory.py
+memory usage 86323.7265625kB; Peak was 86323.796875kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_23: Success, Score +1
+ Last response: $ cat <<'EOF' > memory_leak_script.py
+import tracemalloc
+
+def memory_leak_decorator(func):
+    tracemalloc.start()
+    memory_list = []
+
+    def wrapper(*args, **kwargs):
+        for i in range(500):
+            memory_list.append("data_" * 10000)
+
+        result = func(*args, **kwargs)
+        current, peak = tracemalloc.get_traced_memory()
+        print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+        tracemalloc.stop()
+        return result
+
+    return wrapper
+
+@memory_leak_decorator
+def some_function():
+    pass
+
+some_function()
+EOF
+
+python3 memory_leak_script.py
+memory usage 24438.33203125kB; Peak was 24438.37109375kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_24: Success, Score +1
+ Last response: $ cat <<'EOF' > leak_script.py
+import tracemalloc
+
+class LeakContextManager:
+    def __enter__(self):
+        tracemalloc.start()
+        self.leak_list = []
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        current, peak = tracemalloc.get_traced_memory()
+        print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+        tracemalloc.stop()
+
+    def create_leak(self, num_items):
+        for i in range(num_items):
+            self.leak_list.append("large_data_" * 1000)
+
+def context_manager_leak():
+    with LeakContextManager() as lcm:
+        lcm.create_leak(7500)
+
+context_manager_leak()
+EOF
+
+python3 leak_script.py
+memory usage 80932.29296875kB; Peak was 80932.36328125kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_25: Success, Score +1
+ Last response: $ ls -la
+total 8
+drwxr-xr-x 2 root root 4096 Dec  7 18:36 .
+drwxr-xr-x 1 root root 4096 Dec  7 18:36 ..
+
+
+$ cat <<'EOF' > memory_leak_fix.py
+import tracemalloc
+
+def function_list_leak():
+    tracemalloc.start()
+    func_list = []
+
+    for i in range(500):
+        def add_data():
+            return "large_data_" * 10000
+        func_list.append(add_data)
+
+    leak_list = [func() for func in func_list]
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+function_list_leak()
+EOF
+
+
+$ python3 memory_leak_fix.py
+memory usage 53817.23828125kB; Peak was 53817.28515625kB
+
+
+$ cat <<'EOF' > memory_leak_fix.py
+import tracemalloc
+
+def function_list_leak():
+    tracemalloc.start()
+    func_list = []
+    large_data = "large_data_" * 10000  # Create once, outside the loop
+
+    for i in range(500):
+        def add_data(data=large_data):  # Bind value via default parameter, no closure capture
+            return data
+        func_list.append(add_data)
+
+    leak_list = [func() for func in func_list]
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+function_list_leak()
+EOF
+
+
+$ python3 memory_leak_fix.py
+memory usage 216.9931640625kB; Peak was 217.0400390625kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_26: Success, Score +1
+ Last response: $ cat <<'EOF' > closure_leak.py
+import tracemalloc
+
+def closure_leak():
+    tracemalloc.start()
+
+    def outer_function():
+        leak_list = []
+
+        def inner_function(data):
+            leak_list.append(data)
+
+        return inner_function
+
+    accumulate = outer_function()
+
+    for i in range(1000):
+        accumulate("closure_data_" * 1000)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+closure_leak()
+EOF
+
+
+$ python3 closure_leak.py
+memory usage 12744.328125kB; Peak was 12744.3671875kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_27: Success, Score +1
+ Last response: $ cat <<'EOF' > generator_leak.py
+import tracemalloc
+
+def generator_with_state_leak():
+    tracemalloc.start()
+    leak_list = []
+
+    def stateful_generator(n):
+        state = []
+        for i in range(n):
+            state.append(f"state_data_{i}" * 1000)
+            yield state
+
+    gen = stateful_generator(5000)
+
+    for i, state in enumerate(gen):
+        leak_list.append(state)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+generator_with_state_leak()
+EOF
+
+
+$ python3 generator_leak.py
+memory usage 72440.48828125kB; Peak was 72440.68359375kB
+
+
+$ sed -i 's/yield state/yield state.copy()/g' generator_leak.py
+
+
+$ python3 generator_leak.py
+memory usage 170348.15234375kB; Peak was 170389.1640625kB
+
+
+$ sed -i 's/leak_list.append(state)/# processed state and discarded/g' generator_leak.py
+
+
+$ python3 generator_leak.py
+  File "/testbed/generator_leak.py", line 18
+    current, peak = tracemalloc.get_traced_memory()
+    ^^^^^^^
+IndentationError: expected an indented block after 'for' statement on line 15
+
+Index 27_28: Fail, No score added
+ Last response: $ cat <<'EOF' > accumulator_fix.py
+import tracemalloc
+
+class StaticAccumulator:
+    data = []
+    MAX_SIZE = 100  # Limit the size to prevent memory leaks
+
+    @staticmethod
+    def accumulate(value):
+        StaticAccumulator.data.append(value)
+        # Keep only the last MAX_SIZE items to prevent unbounded growth
+        if len(StaticAccumulator.data) > StaticAccumulator.MAX_SIZE:
+            StaticAccumulator.data = StaticAccumulator.data[-StaticAccumulator.MAX_SIZE:]
+
+def static_method_leak():
+    tracemalloc.start()
+
+    for i in range(1000):
+        StaticAccumulator.accumulate(f"static_data_{i}" * 1000)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+static_method_leak()
+EOF
+
+
+$ python3 accumulator_fix.py
+memory usage 1469.66015625kB; Peak was 1485.3251953125kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_29: Success, Score +1
+ Last response: $ ls -la
+total 8
+drwxr-xr-x 2 root root 4096 Dec  7 18:42 .
+drwxr-xr-x 1 root root 4096 Dec  7 18:42 ..
+
+
+$ cat <<'EOF' > property_leak.py
+import tracemalloc
+
+class PropertyAccumulator:
+    def __init__(self):
+        self._data = []
+
+    @property
+    def data(self):
+        return self._data
+
+    @data.setter
+    def data(self, value):
+        self._data.append(value)
+
+def property_leak():
+    tracemalloc.start()
+    accumulator = PropertyAccumulator()
+
+    for i in range(800):
+        accumulator.data = f"property_data_{i}" * 1000
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+property_leak()
+EOF
+
+
+$ python3 property_leak.py
+memory usage 13212.9296875kB; Peak was 13213.025390625kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+
+Index 27_30: Success, Score +1
+ Last response: $ cat <<'EOF' > memory_leak_script.py
+import tracemalloc
+
+def list_append_leak():
+    tracemalloc.start()
+    leak_list = []
+
+    def append_data(num_items):
+        for i in range(num_items):
+            leak_list.append(f"loop_data_{i}" * 1000)
+
+    append_data(1000)
+
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"memory usage {current / 1024}kB; Peak was {peak / 1024}kB")
+    tracemalloc.stop()
+
+list_append_leak()
+EOF
+
+python3 memory_leak_script.py
+memory usage 12636.6796875kB; Peak was 12636.802734375kB
+
+
+$ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+fatal: not a git repository (or any of the parent directories): .git
+

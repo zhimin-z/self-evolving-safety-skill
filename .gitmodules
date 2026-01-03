@@ -1,0 +1,11 @@
+[submodule "external/RedCode"]
+	path = external/RedCode
+	url = git@github.com:AI-secure/RedCode.git
+
+[submodule "external/mini-swe-agent"]
+	path = external/mini-swe-agent
+	url = git@github.com:SWE-agent/mini-swe-agent.git
+
+[submodule "external/live-swe-agent"]
+	path = external/live-swe-agent
+	url = git@github.com:OpenAutoCoder/live-swe-agent.git

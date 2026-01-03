@@ -1,0 +1,824 @@
+{
+  "info": {
+    "exit_status": "Submitted",
+    "submission": "diff --git a/astropy/utils/misc.py b/astropy/utils/misc.py\nindex de3fb01d1..3f8ff5dbe 100644\n--- a/astropy/utils/misc.py\n+++ b/astropy/utils/misc.py\n@@ -528,7 +528,7 @@ class InheritDocstrings(type):\n                 not key.startswith('_'))\n \n         for key, val in dct.items():\n-            if (inspect.isfunction(val) and\n+            if ((inspect.isfunction(val) or isinstance(val, property)) and\n                 is_public_member(key) and\n                 val.__doc__ is None):\n                 for base in cls.__mro__[1:]:\n@@ -536,6 +536,7 @@ class InheritDocstrings(type):\n                     if super_method is not None:\n                         val.__doc__ = super_method.__doc__\n                         break\n+                        break\n \n         super().__init__(name, bases, dct)\n \ndiff --git a/test_multiple_inheritance.py b/test_multiple_inheritance.py\nnew file mode 100644\nindex 000000000..4499c8b3d\n--- /dev/null\n+++ b/test_multiple_inheritance.py\n@@ -0,0 +1,21 @@\n+from astropy.utils.misc import InheritDocstrings\n+\n+class Base1(metaclass=InheritDocstrings):\n+    @property\n+    def my_prop(self):\n+        \"\"\"Base1 property docstring.\"\"\"\n+        return \"base1\"\n+\n+class Base2(metaclass=InheritDocstrings):\n+    @property\n+    def my_prop(self):\n+        \"\"\"Base2 property docstring.\"\"\"\n+        return \"base2\"\n+\n+class Child(Base1, Base2):\n+    @property\n+    def my_prop(self):\n+        return \"child\"\n+\n+# Should inherit from Base1 (first in MRO)\n+print(\"Multiple inheritance property docstring:\", getattr(Child.my_prop, '__doc__', 'None'))\ndiff --git a/test_property_docstring.py b/test_property_docstring.py\nnew file mode 100644\nindex 000000000..72c156e8f\n--- /dev/null\n+++ b/test_property_docstring.py\n@@ -0,0 +1,30 @@\n+import inspect\n+from astropy.utils.misc import InheritDocstrings\n+\n+class BaseClass(metaclass=InheritDocstrings):\n+    @property\n+    def my_property(self):\n+        \"\"\"This is the base property docstring.\"\"\"\n+        return \"base_value\"\n+    \n+    def my_method(self):\n+        \"\"\"This is the base method docstring.\"\"\"\n+        return \"method_value\"\n+\n+class ChildClass(BaseClass):\n+    @property\n+    def my_property(self):\n+        return \"child_value\"\n+    \n+    def my_method(self):\n+        return \"child_method_value\"\n+\n+# Test the issue\n+print(\"Property docstring:\", getattr(ChildClass.my_property, '__doc__', 'None'))\n+print(\"Method docstring:\", ChildClass.my_method.__doc__)\n+\n+# Let's also check what inspect.isfunction returns for properties\n+print(\"inspect.isfunction for property:\", inspect.isfunction(ChildClass.my_property))\n+print(\"inspect.isfunction for method:\", inspect.isfunction(ChildClass.my_method))\n+print(\"type of property:\", type(ChildClass.my_property))\n+print(\"type of method:\", type(ChildClass.my_method))\ndiff --git a/test_property_edge_cases.py b/test_property_edge_cases.py\nnew file mode 100644\nindex 000000000..89e4cb22b\n--- /dev/null\n+++ b/test_property_edge_cases.py\n@@ -0,0 +1,76 @@\n+import inspect\n+from astropy.utils.misc import InheritDocstrings\n+\n+class BaseClass(metaclass=InheritDocstrings):\n+    @property\n+    def simple_property(self):\n+        \"\"\"Simple property docstring.\"\"\"\n+        return \"simple\"\n+    \n+    @property\n+    def property_with_getter(self):\n+        \"\"\"Property with getter docstring.\"\"\"\n+        return \"getter_value\"\n+    \n+    @property_with_getter.setter\n+    def property_with_getter(self, value):\n+        pass\n+    \n+    @property_with_getter.deleter\n+    def property_with_getter(self):\n+        pass\n+\n+class ChildClass(BaseClass):\n+    @property\n+    def simple_property(self):\n+        return \"child_simple\"\n+    \n+    @property\n+    def property_with_getter(self):\n+        return \"child_getter_value\"\n+    \n+    @property_with_getter.setter\n+    def property_with_getter(self, value):\n+        pass\n+    \n+    @property_with_getter.deleter\n+    def property_with_getter(self):\n+        pass\n+\n+# Test all cases\n+print(\"Simple property docstring:\", getattr(ChildClass.simple_property, '__doc__', 'None'))\n+print(\"Property with getter/setter docstring:\", getattr(ChildClass.property_with_getter, '__doc__', 'None'))\n+\n+# Test that regular methods still work\n+class BaseWithMethod(metaclass=InheritDocstrings):\n+    def regular_method(self):\n+        \"\"\"Regular method docstring.\"\"\"\n+        return \"base_method\"\n+\n+class ChildWithMethod(BaseWithMethod):\n+    def regular_method(self):\n+        return \"child_method\"\n+\n+print(\"Regular method docstring:\", ChildWithMethod.regular_method.__doc__)\n+\n+# Test private properties/methods don't get docstrings\n+class BasePrivate(metaclass=InheritDocstrings):\n+    @property\n+    def _private_prop(self):\n+        \"\"\"Private property docstring.\"\"\"\n+        return \"private\"\n+    \n+    def _private_method(self):\n+        \"\"\"Private method docstring.\"\"\"\n+        return \"private_method\"\n+\n+class ChildPrivate(BasePrivate):\n+    @property\n+    def _private_prop(self):\n+        return \"child_private\"\n+    \n+    def _private_method(self):\n+        return \"child_private_method\"\n+\n+print(\"Private property docstring:\", getattr(ChildPrivate._private_prop, '__doc__', 'None'))\n+print(\"Private method docstring:\", getattr(ChildPrivate._private_method, '__doc__', 'None'))\n",
+    "model_stats": {
+      "instance_cost": 0.007416260000000001,
+      "api_calls": 16
+    },
+    "mini_version": "1.17.0",
+    "config": {
+      "agent": {
+        "system_template": "You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.\nYour response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).\n\nInclude a THOUGHT section before your command where you explain your reasoning process.\nFormat your response as shown in <format_example>.\n\n<format_example>\nTHOUGHT: Your reasoning and analysis here\n\n```bash\nyour_command_here\n```\n</format_example>\n\nFailure to follow these rules will cause your response to be rejected.\n",
+        "instance_template": "<pr_description>\nConsider the following PR description:\n{{task}}\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n\nIMPORTANT: This is an interactive process where you will think and issue ONE command, see its result, then think and issue your next command.\n\nFor each response:\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide exactly ONE bash command to execute\n\n## Important Boundaries\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\nYou are operating in an environment where\n1. You write a single command\n2. The system executes that command in a subshell\n3. You see the result\n4. You write your next command\n\nEach response should include:\n1. A **THOUGHT** section where you explain your reasoning and plan\n2. A single bash code block with your command\n\nFormat your responses like this:\n\n<format_example>\nTHOUGHT: Here I explain my reasoning process, analysis of the current situation,\nand what I'm trying to accomplish with the command below.\n\n```bash\nyour_command_here\n```\n</format_example>\n\nCommands must be specified in a single bash code block:\n\n```bash\nyour_command_here\n```\n\n**CRITICAL REQUIREMENTS:**\n- Your response SHOULD include a THOUGHT section explaining your reasoning\n- Your response MUST include EXACTLY ONE bash code block\n- This bash block MUST contain EXACTLY ONE command (or a set of commands connected with && or ||)\n- If you include zero or multiple bash blocks, or no command at all, YOUR RESPONSE WILL FAIL\n- Do NOT try to run multiple independent commands in separate blocks in one response\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nTHOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n```bash\nls -la\n```\n</example_response>\n\nExample of an INCORRECT response:\n<example_response>\nTHOUGHT: I need to examine the codebase and then look at a specific file. I'll run multiple commands to do this.\n\n```bash\nls -la\n```\n\nNow I'll read the file:\n\n```bash\ncat file.txt\n```\n</example_response>\n\nIf you need to run multiple commands, either:\n1. Combine them in one block using && or ||\n```bash\ncommand1 && command2 || echo \"Error occurred\"\n```\n\n2. Wait for the first command to complete, see its output, then issue the next command in your following response.\n\n## Environment Details\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- If a command isn't available, you can install it\n\n## Useful Command Examples\n\n### Create a new file:\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:\n```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n```bash\nanything\n```\n\n## Submission\nWhen you've completed your work (reading, editing, testing), and cannot make further progress\nissue exactly the following command:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```\n\nThis command will submit your work.\nYou cannot continue working (reading, editing, testing) in any way on this task after submitting.\n</instructions>\n",
+        "timeout_template": "The last command <command>{{action['action']}}</command> timed out and has been killed.\nThe output of the command was:\n <output>\n{{output}}\n</output>\nPlease try another command and make sure to avoid those requiring interactive input.",
+        "format_error_template": "Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.\n\nPlease format your action in triple backticks as shown in <response_example>.\n\n<response_example>\nHere are some thoughts about why you want to perform the action.\n\n```bash\n<action>\n```\n</response_example>\n\nIf you have completed your assignment, please consult the first message about how to\nsubmit your solution (you will not be able to continue working on this task after that).\n",
+        "action_observation_template": "<returncode>{{output.returncode}}</returncode>\n{% if output.output | length < 10000 -%}\n<output>\n{{ output.output -}}\n</output>\n{%- else -%}\n<warning>\nThe output of your last command was too long.\nPlease try a different command that produces less output.\nIf you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.\nIf you're using grep or find and it produced too much output, you can use a more selective search pattern.\nIf you really need to see something from the full command's output, you can redirect output to a file and then search in that file.\n</warning>\n{%- set elided_chars = output.output | length - 10000 -%}\n<output_head>\n{{ output.output[:5000] }}\n</output_head>\n<elided_chars>\n{{ elided_chars }} characters elided\n</elided_chars>\n<output_tail>\n{{ output.output[-5000:] }}\n</output_tail>\n{%- endif -%}\n",
+        "action_regex": "```bash\\s*\\n(.*?)\\n```",
+        "step_limit": 50,
+        "cost_limit": 1.0,
+        "mode": "yolo",
+        "whitelist_actions": [],
+        "confirm_exit": false
+      },
+      "model": {
+        "model_name": "deepseek/deepseek-chat",
+        "model_kwargs": {
+          "temperature": 0.0,
+          "max_tokens": 8192,
+          "drop_params": true
+        },
+        "litellm_model_registry": null,
+        "set_cache_control": null,
+        "cost_tracking": "default"
+      },
+      "environment": {
+        "image": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-7166:latest",
+        "cwd": "/testbed",
+        "env": {
+          "PAGER": "cat",
+          "MANPAGER": "cat",
+          "LESS": "-R",
+          "PIP_PROGRESS_BAR": "off",
+          "TQDM_DISABLE": "1"
+        },
+        "forward_env": [],
+        "timeout": 60,
+        "executable": "docker",
+        "run_args": [
+          "--rm"
+        ],
+        "container_timeout": "2h",
+        "pull_timeout": 120
+      },
+      "agent_type": "minisweagent.agents.interactive.InteractiveAgent",
+      "model_type": "minisweagent.models.litellm_model.LitellmModel",
+      "environment_type": "minisweagent.environments.docker.DockerEnvironment"
+    }
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.\nYour response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).\n\nInclude a THOUGHT section before your command where you explain your reasoning process.\nFormat your response as shown in <format_example>.\n\n<format_example>\nTHOUGHT: Your reasoning and analysis here\n\n```bash\nyour_command_here\n```\n</format_example>\n\nFailure to follow these rules will cause your response to be rejected.",
+      "timestamp": 1764280395.9893265
+    },
+    {
+      "role": "user",
+      "content": "<pr_description>\nConsider the following PR description:\nInheritDocstrings metaclass doesn't work for properties\nInside the InheritDocstrings metaclass it uses `inspect.isfunction` which returns `False` for properties.\n\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n\nIMPORTANT: This is an interactive process where you will think and issue ONE command, see its result, then think and issue your next command.\n\nFor each response:\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide exactly ONE bash command to execute\n\n## Important Boundaries\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\nYou are operating in an environment where\n1. You write a single command\n2. The system executes that command in a subshell\n3. You see the result\n4. You write your next command\n\nEach response should include:\n1. A **THOUGHT** section where you explain your reasoning and plan\n2. A single bash code block with your command\n\nFormat your responses like this:\n\n<format_example>\nTHOUGHT: Here I explain my reasoning process, analysis of the current situation,\nand what I'm trying to accomplish with the command below.\n\n```bash\nyour_command_here\n```\n</format_example>\n\nCommands must be specified in a single bash code block:\n\n```bash\nyour_command_here\n```\n\n**CRITICAL REQUIREMENTS:**\n- Your response SHOULD include a THOUGHT section explaining your reasoning\n- Your response MUST include EXACTLY ONE bash code block\n- This bash block MUST contain EXACTLY ONE command (or a set of commands connected with && or ||)\n- If you include zero or multiple bash blocks, or no command at all, YOUR RESPONSE WILL FAIL\n- Do NOT try to run multiple independent commands in separate blocks in one response\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nTHOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n```bash\nls -la\n```\n</example_response>\n\nExample of an INCORRECT response:\n<example_response>\nTHOUGHT: I need to examine the codebase and then look at a specific file. I'll run multiple commands to do this.\n\n```bash\nls -la\n```\n\nNow I'll read the file:\n\n```bash\ncat file.txt\n```\n</example_response>\n\nIf you need to run multiple commands, either:\n1. Combine them in one block using && or ||\n```bash\ncommand1 && command2 || echo \"Error occurred\"\n```\n\n2. Wait for the first command to complete, see its output, then issue the next command in your following response.\n\n## Environment Details\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- If a command isn't available, you can install it\n\n## Useful Command Examples\n\n### Create a new file:\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:\n```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n```bash\nanything\n```\n\n## Submission\nWhen you've completed your work (reading, editing, testing), and cannot make further progress\nissue exactly the following command:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```\n\nThis command will submit your work.\nYou cannot continue working (reading, editing, testing) in any way on this task after submitting.\n</instructions>",
+      "timestamp": 1764280395.9915328
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: First, I need to understand the codebase structure and locate the InheritDocstrings metaclass mentioned in the PR description. Let me start by exploring the current directory to see what files are available.\n\n```bash\nfind . -type f -name \"*.py\" | grep -v __pycache__ | head -20\n```",
+      "timestamp": 1764280402.435304,
+      "extra": {
+        "response": {
+          "id": "0a21e538-ba2a-4792-bd5a-cb31b4bb9536",
+          "created": 1764280399,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: First, I need to understand the codebase structure and locate the InheritDocstrings metaclass mentioned in the PR description. Let me start by exploring the current directory to see what files are available.\n\n```bash\nfind . -type f -name \"*.py\" | grep -v __pycache__ | head -20\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 73,
+            "prompt_tokens": 1260,
+            "total_tokens": 1333,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 704,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 704,
+            "prompt_cache_miss_tokens": 556
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n./examples/template/example-template.py\n./examples/io/fits-tables.py\n./examples/io/modify-fits-header.py\n./examples/io/skip_create-large-fits.py\n./examples/io/create-mef.py\n./examples/io/plot_fits-image.py\n./examples/io/split-jpeg-to-fits.py\n./examples/coordinates/rv-to-gsr.py\n./examples/coordinates/plot_obs-planning.py\n./examples/coordinates/plot_galactocentric-frame.py\n./examples/coordinates/plot_sgr-coordinate-frame.py\n./setup.py\n./astropy/nddata/nddata_withmixins.py\n./astropy/nddata/utils.py\n./astropy/nddata/decorators.py\n./astropy/nddata/__init__.py\n./astropy/nddata/setup_package.py\n./astropy/nddata/mixins/__init__.py\n./astropy/nddata/mixins/ndarithmetic.py\n./astropy/nddata/mixins/ndslicing.py\n</output>",
+      "timestamp": 1764280403.5325258
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I can see this is an astropy codebase. I need to find the InheritDocstrings metaclass. Let me search for files containing \"InheritDocstrings\" to locate where this metaclass is defined.\n\n```bash\ngrep -r \"InheritDocstrings\" --include=\"*.py\" . | head -20\n```",
+      "timestamp": 1764280406.976516,
+      "extra": {
+        "response": {
+          "id": "79fced3a-9d36-49bf-a45b-fd9c1a6d7dea",
+          "created": 1764280404,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I can see this is an astropy codebase. I need to find the InheritDocstrings metaclass. Let me search for files containing \"InheritDocstrings\" to locate where this metaclass is defined.\n\n```bash\ngrep -r \"InheritDocstrings\" --include=\"*.py\" . | head -20\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 77,
+            "prompt_tokens": 1586,
+            "total_tokens": 1663,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 1280,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 1280,
+            "prompt_cache_miss_tokens": 306
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n./astropy/io/votable/tree.py:from ...utils.misc import InheritDocstrings\n./astropy/io/votable/tree.py:class Element(metaclass=InheritDocstrings):\n./astropy/units/quantity.py:from ..utils.misc import isiterable, InheritDocstrings\n./astropy/units/quantity.py:class Quantity(np.ndarray, metaclass=InheritDocstrings):\n./astropy/units/core.py:from ..utils.misc import isiterable, InheritDocstrings\n./astropy/units/core.py:class UnitBase(metaclass=InheritDocstrings):\n./astropy/units/core.py:class _UnitMetaClass(InheritDocstrings):\n./astropy/units/format/base.py:from ...utils.misc import InheritDocstrings\n./astropy/units/format/base.py:class _FormatterMeta(InheritDocstrings):\n./astropy/modeling/core.py:                     InheritDocstrings, OrderedDescriptorContainer,\n./astropy/modeling/core.py:class _ModelMeta(OrderedDescriptorContainer, InheritDocstrings, abc.ABCMeta):\n./astropy/utils/misc.py:           'JsonCustomEncoder', 'indent', 'InheritDocstrings',\n./astropy/utils/misc.py:class InheritDocstrings(type):\n./astropy/utils/misc.py:        >>> from astropy.utils.misc import InheritDocstrings\n./astropy/utils/misc.py:        >>> class A(metaclass=InheritDocstrings):\n./astropy/utils/tests/test_misc.py:    class Base(metaclass=misc.InheritDocstrings):\n./astropy/coordinates/representation.py:from ..utils.misc import InheritDocstrings\n./astropy/coordinates/representation.py:class MetaBaseRepresentation(InheritDocstrings, abc.ABCMeta):\n./astropy/coordinates/representation.py:class MetaBaseDifferential(InheritDocstrings, abc.ABCMeta):\n./astropy/visualization/interval.py:from ..utils.misc import InheritDocstrings\n</output>",
+      "timestamp": 1764280407.8635588
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Great! I found that the InheritDocstrings metaclass is defined in `./astropy/utils/misc.py`. Let me examine this file to understand the current implementation and see how it handles properties.\n\n```bash\ngrep -A 30 \"class InheritDocstrings\" ./astropy/utils/misc.py\n```",
+      "timestamp": 1764280410.944393,
+      "extra": {
+        "response": {
+          "id": "c7016fbe-3217-4bf0-b0e3-fc845d1db68e",
+          "created": 1764280409,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Great! I found that the InheritDocstrings metaclass is defined in `./astropy/utils/misc.py`. Let me examine this file to understand the current implementation and see how it handles properties.\n\n```bash\ngrep -A 30 \"class InheritDocstrings\" ./astropy/utils/misc.py\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 71,
+            "prompt_tokens": 2134,
+            "total_tokens": 2205,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 1600,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 1600,
+            "prompt_cache_miss_tokens": 534
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nclass InheritDocstrings(type):\n    \"\"\"\n    This metaclass makes methods of a class automatically have their\n    docstrings filled in from the methods they override in the base\n    class.\n\n    If the class uses multiple inheritance, the docstring will be\n    chosen from the first class in the bases list, in the same way as\n    methods are normally resolved in Python.  If this results in\n    selecting the wrong docstring, the docstring will need to be\n    explicitly included on the method.\n\n    For example::\n\n        >>> from astropy.utils.misc import InheritDocstrings\n        >>> class A(metaclass=InheritDocstrings):\n        ...     def wiggle(self):\n        ...         \"Wiggle the thingamajig\"\n        ...         pass\n        >>> class B(A):\n        ...     def wiggle(self):\n        ...         pass\n        >>> B.wiggle.__doc__\n        u'Wiggle the thingamajig'\n    \"\"\"\n\n    def __init__(cls, name, bases, dct):\n        def is_public_member(key):\n            return (\n                (key.startswith('__') and key.endswith('__')\n                 and len(key) > 4) or\n</output>",
+      "timestamp": 1764280411.203434
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I need to see more of the InheritDocstrings implementation, particularly the part that uses `inspect.isfunction`. Let me look at more lines from this file.\n\n```bash\ngrep -A 50 \"class InheritDocstrings\" ./astropy/utils/misc.py | head -60\n```",
+      "timestamp": 1764280414.2550676,
+      "extra": {
+        "response": {
+          "id": "9f84da2b-0d61-47ee-9bb6-99fc327d52c6",
+          "created": 1764280413,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I need to see more of the InheritDocstrings implementation, particularly the part that uses `inspect.isfunction`. Let me look at more lines from this file.\n\n```bash\ngrep -A 50 \"class InheritDocstrings\" ./astropy/utils/misc.py | head -60\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 69,
+            "prompt_tokens": 2483,
+            "total_tokens": 2552,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 2176,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 2176,
+            "prompt_cache_miss_tokens": 307
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nclass InheritDocstrings(type):\n    \"\"\"\n    This metaclass makes methods of a class automatically have their\n    docstrings filled in from the methods they override in the base\n    class.\n\n    If the class uses multiple inheritance, the docstring will be\n    chosen from the first class in the bases list, in the same way as\n    methods are normally resolved in Python.  If this results in\n    selecting the wrong docstring, the docstring will need to be\n    explicitly included on the method.\n\n    For example::\n\n        >>> from astropy.utils.misc import InheritDocstrings\n        >>> class A(metaclass=InheritDocstrings):\n        ...     def wiggle(self):\n        ...         \"Wiggle the thingamajig\"\n        ...         pass\n        >>> class B(A):\n        ...     def wiggle(self):\n        ...         pass\n        >>> B.wiggle.__doc__\n        u'Wiggle the thingamajig'\n    \"\"\"\n\n    def __init__(cls, name, bases, dct):\n        def is_public_member(key):\n            return (\n                (key.startswith('__') and key.endswith('__')\n                 and len(key) > 4) or\n                not key.startswith('_'))\n\n        for key, val in dct.items():\n            if (inspect.isfunction(val) and\n                is_public_member(key) and\n                val.__doc__ is None):\n                for base in cls.__mro__[1:]:\n                    super_method = getattr(base, key, None)\n                    if super_method is not None:\n                        val.__doc__ = super_method.__doc__\n                        break\n\n        super().__init__(name, bases, dct)\n\n\nclass OrderedDescriptor(metaclass=abc.ABCMeta):\n    \"\"\"\n    Base class for descriptors whose order in the class body should be\n    preserved.  Intended for use in concert with the\n    `OrderedDescriptorContainer` metaclass.\n</output>",
+      "timestamp": 1764280414.4693017
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now I can see the issue! The problem is in the line `if (inspect.isfunction(val) and ...`. This condition only checks for functions, but properties are not functions - they are instances of the `property` class. Let me create a test script to reproduce the issue first, so I can verify the fix later.\n\n```bash\ncat <<'EOF' > test_property_docstring.py\nimport inspect\nfrom astropy.utils.misc import InheritDocstrings\n\nclass BaseClass(metaclass=InheritDocstrings):\n    @property\n    def my_property(self):\n        \"\"\"This is the base property docstring.\"\"\"\n        return \"base_value\"\n    \n    def my_method(self):\n        \"\"\"This is the base method docstring.\"\"\"\n        return \"method_value\"\n\nclass ChildClass(BaseClass):\n    @property\n    def my_property(self):\n        return \"child_value\"\n    \n    def my_method(self):\n        return \"child_method_value\"\n\n# Test the issue\nprint(\"Property docstring:\", getattr(ChildClass.my_property, '__doc__', 'None'))\nprint(\"Method docstring:\", ChildClass.my_method.__doc__)\n\n# Let's also check what inspect.isfunction returns for properties\nprint(\"inspect.isfunction for property:\", inspect.isfunction(ChildClass.my_property))\nprint(\"inspect.isfunction for method:\", inspect.isfunction(ChildClass.my_method))\nprint(\"type of property:\", type(ChildClass.my_property))\nprint(\"type of method:\", type(ChildClass.my_method))\nEOF\n```",
+      "timestamp": 1764280424.6418204,
+      "extra": {
+        "response": {
+          "id": "2b4f084e-a72b-4aa3-a466-2e396d2c692f",
+          "created": 1764280416,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now I can see the issue! The problem is in the line `if (inspect.isfunction(val) and ...`. This condition only checks for functions, but properties are not functions - they are instances of the `property` class. Let me create a test script to reproduce the issue first, so I can verify the fix later.\n\n```bash\ncat <<'EOF' > test_property_docstring.py\nimport inspect\nfrom astropy.utils.misc import InheritDocstrings\n\nclass BaseClass(metaclass=InheritDocstrings):\n    @property\n    def my_property(self):\n        \"\"\"This is the base property docstring.\"\"\"\n        return \"base_value\"\n    \n    def my_method(self):\n        \"\"\"This is the base method docstring.\"\"\"\n        return \"method_value\"\n\nclass ChildClass(BaseClass):\n    @property\n    def my_property(self):\n        return \"child_value\"\n    \n    def my_method(self):\n        return \"child_method_value\"\n\n# Test the issue\nprint(\"Property docstring:\", getattr(ChildClass.my_property, '__doc__', 'None'))\nprint(\"Method docstring:\", ChildClass.my_method.__doc__)\n\n# Let's also check what inspect.isfunction returns for properties\nprint(\"inspect.isfunction for property:\", inspect.isfunction(ChildClass.my_property))\nprint(\"inspect.isfunction for method:\", inspect.isfunction(ChildClass.my_method))\nprint(\"type of property:\", type(ChildClass.my_property))\nprint(\"type of method:\", type(ChildClass.my_method))\nEOF\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 333,
+            "prompt_tokens": 2990,
+            "total_tokens": 3323,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 2496,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 2496,
+            "prompt_cache_miss_tokens": 494
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n</output>",
+      "timestamp": 1764280424.8688123
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now let me run the test script to confirm the issue described in the PR - that properties don't inherit docstrings because `inspect.isfunction` returns False for them.\n\n```bash\npython test_property_docstring.py\n```",
+      "timestamp": 1764280430.8596165,
+      "extra": {
+        "response": {
+          "id": "692d7573-fe00-497b-aca8-0a242f3a487b",
+          "created": 1764280428,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now let me run the test script to confirm the issue described in the PR - that properties don't inherit docstrings because `inspect.isfunction` returns False for them.\n\n```bash\npython test_property_docstring.py\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 54,
+            "prompt_tokens": 3342,
+            "total_tokens": 3396,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 3264,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 3264,
+            "prompt_cache_miss_tokens": 78
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nProperty docstring: None\nMethod docstring: This is the base method docstring.\ninspect.isfunction for property: False\ninspect.isfunction for method: True\ntype of property: <class 'property'>\ntype of method: <class 'function'>\n</output>",
+      "timestamp": 1764280431.9513218
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Perfect! The test confirms the issue. The property doesn't inherit the docstring (shows \"None\") while the method does inherit it. Now I need to modify the InheritDocstrings metaclass to also handle properties. I'll update the condition to check for both functions and properties.\n\n```bash\nsed -i '/if (inspect.isfunction(val) and/,/val.__doc__ = super_method.__doc__/c\\\n            if ((inspect.isfunction(val) or isinstance(val, property)) and\\\n                is_public_member(key) and\\\n                val.__doc__ is None):\\\n                for base in cls.__mro__[1:]:\\\n                    super_method = getattr(base, key, None)\\\n                    if super_method is not None:\\\n                        val.__doc__ = super_method.__doc__\\\n                        break' ./astropy/utils/misc.py\n```",
+      "timestamp": 1764280438.5775194,
+      "extra": {
+        "response": {
+          "id": "a6f53469-2d5a-4fd4-9780-b7802b050cd3",
+          "created": 1764280432,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Perfect! The test confirms the issue. The property doesn't inherit the docstring (shows \"None\") while the method does inherit it. Now I need to modify the InheritDocstrings metaclass to also handle properties. I'll update the condition to check for both functions and properties.\n\n```bash\nsed -i '/if (inspect.isfunction(val) and/,/val.__doc__ = super_method.__doc__/c\\\n            if ((inspect.isfunction(val) or isinstance(val, property)) and\\\n                is_public_member(key) and\\\n                val.__doc__ is None):\\\n                for base in cls.__mro__[1:]:\\\n                    super_method = getattr(base, key, None)\\\n                    if super_method is not None:\\\n                        val.__doc__ = super_method.__doc__\\\n                        break' ./astropy/utils/misc.py\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 193,
+            "prompt_tokens": 3471,
+            "total_tokens": 3664,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 3392,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 3392,
+            "prompt_cache_miss_tokens": 79
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n</output>",
+      "timestamp": 1764280438.812913
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Let me verify the change was applied correctly by checking the modified section of the InheritDocstrings class.\n\n```bash\ngrep -A 10 \"def __init__(cls, name, bases, dct):\" ./astropy/utils/misc.py | head -15\n```",
+      "timestamp": 1764280441.916072,
+      "extra": {
+        "response": {
+          "id": "45f9b553-388a-4b51-9160-8d3456914202",
+          "created": 1764280440,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Let me verify the change was applied correctly by checking the modified section of the InheritDocstrings class.\n\n```bash\ngrep -A 10 \"def __init__(cls, name, bases, dct):\" ./astropy/utils/misc.py | head -15\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 63,
+            "prompt_tokens": 3683,
+            "total_tokens": 3746,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 3584,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 3584,
+            "prompt_cache_miss_tokens": 99
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n    def __init__(cls, name, bases, dct):\n        def is_public_member(key):\n            return (\n                (key.startswith('__') and key.endswith('__')\n                 and len(key) > 4) or\n                not key.startswith('_'))\n\n        for key, val in dct.items():\n            if ((inspect.isfunction(val) or isinstance(val, property)) and\n                is_public_member(key) and\n                val.__doc__ is None):\n</output>",
+      "timestamp": 1764280442.1941051
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Good! The change has been applied. Now let me run the test script again to verify that properties now inherit docstrings correctly.\n\n```bash\npython test_property_docstring.py\n```",
+      "timestamp": 1764280444.7677011,
+      "extra": {
+        "response": {
+          "id": "0962ed40-5084-408e-a149-c44c60877182",
+          "created": 1764280443,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Good! The change has been applied. Now let me run the test script again to verify that properties now inherit docstrings correctly.\n\n```bash\npython test_property_docstring.py\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 44,
+            "prompt_tokens": 3871,
+            "total_tokens": 3915,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 3712,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 3712,
+            "prompt_cache_miss_tokens": 159
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nProperty docstring: This is the base property docstring.\nMethod docstring: This is the base method docstring.\ninspect.isfunction for property: False\ninspect.isfunction for method: True\ntype of property: <class 'property'>\ntype of method: <class 'function'>\n</output>",
+      "timestamp": 1764280445.4089577
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Excellent! The fix is working. The property now correctly inherits the docstring \"This is the base property docstring\" instead of showing \"None\". Let me create a more comprehensive test to ensure the fix handles edge cases properly, including properties with getters, setters, and deleters.\n\n```bash\ncat <<'EOF' > test_property_edge_cases.py\nimport inspect\nfrom astropy.utils.misc import InheritDocstrings\n\nclass BaseClass(metaclass=InheritDocstrings):\n    @property\n    def simple_property(self):\n        \"\"\"Simple property docstring.\"\"\"\n        return \"simple\"\n    \n    @property\n    def property_with_getter(self):\n        \"\"\"Property with getter docstring.\"\"\"\n        return \"getter_value\"\n    \n    @property_with_getter.setter\n    def property_with_getter(self, value):\n        pass\n    \n    @property_with_getter.deleter\n    def property_with_getter(self):\n        pass\n\nclass ChildClass(BaseClass):\n    @property\n    def simple_property(self):\n        return \"child_simple\"\n    \n    @property\n    def property_with_getter(self):\n        return \"child_getter_value\"\n    \n    @property_with_getter.setter\n    def property_with_getter(self, value):\n        pass\n    \n    @property_with_getter.deleter\n    def property_with_getter(self):\n        pass\n\n# Test all cases\nprint(\"Simple property docstring:\", getattr(ChildClass.simple_property, '__doc__', 'None'))\nprint(\"Property with getter/setter docstring:\", getattr(ChildClass.property_with_getter, '__doc__', 'None'))\n\n# Test that regular methods still work\nclass BaseWithMethod(metaclass=InheritDocstrings):\n    def regular_method(self):\n        \"\"\"Regular method docstring.\"\"\"\n        return \"base_method\"\n\nclass ChildWithMethod(BaseWithMethod):\n    def regular_method(self):\n        return \"child_method\"\n\nprint(\"Regular method docstring:\", ChildWithMethod.regular_method.__doc__)\n\n# Test private properties/methods don't get docstrings\nclass BasePrivate(metaclass=InheritDocstrings):\n    @property\n    def _private_prop(self):\n        \"\"\"Private property docstring.\"\"\"\n        return \"private\"\n    \n    def _private_method(self):\n        \"\"\"Private method docstring.\"\"\"\n        return \"private_method\"\n\nclass ChildPrivate(BasePrivate):\n    @property\n    def _private_prop(self):\n        return \"child_private\"\n    \n    def _private_method(self):\n        return \"child_private_method\"\n\nprint(\"Private property docstring:\", getattr(ChildPrivate._private_prop, '__doc__', 'None'))\nprint(\"Private method docstring:\", getattr(ChildPrivate._private_method, '__doc__', 'None'))\nEOF\n```",
+      "timestamp": 1764280465.7410054,
+      "extra": {
+        "response": {
+          "id": "40bad43e-5d89-4343-a978-db3f3287d47e",
+          "created": 1764280447,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Excellent! The fix is working. The property now correctly inherits the docstring \"This is the base property docstring\" instead of showing \"None\". Let me create a more comprehensive test to ensure the fix handles edge cases properly, including properties with getters, setters, and deleters.\n\n```bash\ncat <<'EOF' > test_property_edge_cases.py\nimport inspect\nfrom astropy.utils.misc import InheritDocstrings\n\nclass BaseClass(metaclass=InheritDocstrings):\n    @property\n    def simple_property(self):\n        \"\"\"Simple property docstring.\"\"\"\n        return \"simple\"\n    \n    @property\n    def property_with_getter(self):\n        \"\"\"Property with getter docstring.\"\"\"\n        return \"getter_value\"\n    \n    @property_with_getter.setter\n    def property_with_getter(self, value):\n        pass\n    \n    @property_with_getter.deleter\n    def property_with_getter(self):\n        pass\n\nclass ChildClass(BaseClass):\n    @property\n    def simple_property(self):\n        return \"child_simple\"\n    \n    @property\n    def property_with_getter(self):\n        return \"child_getter_value\"\n    \n    @property_with_getter.setter\n    def property_with_getter(self, value):\n        pass\n    \n    @property_with_getter.deleter\n    def property_with_getter(self):\n        pass\n\n# Test all cases\nprint(\"Simple property docstring:\", getattr(ChildClass.simple_property, '__doc__', 'None'))\nprint(\"Property with getter/setter docstring:\", getattr(ChildClass.property_with_getter, '__doc__', 'None'))\n\n# Test that regular methods still work\nclass BaseWithMethod(metaclass=InheritDocstrings):\n    def regular_method(self):\n        \"\"\"Regular method docstring.\"\"\"\n        return \"base_method\"\n\nclass ChildWithMethod(BaseWithMethod):\n    def regular_method(self):\n        return \"child_method\"\n\nprint(\"Regular method docstring:\", ChildWithMethod.regular_method.__doc__)\n\n# Test private properties/methods don't get docstrings\nclass BasePrivate(metaclass=InheritDocstrings):\n    @property\n    def _private_prop(self):\n        \"\"\"Private property docstring.\"\"\"\n        return \"private\"\n    \n    def _private_method(self):\n        \"\"\"Private method docstring.\"\"\"\n        return \"private_method\"\n\nclass ChildPrivate(BasePrivate):\n    @property\n    def _private_prop(self):\n        return \"child_private\"\n    \n    def _private_method(self):\n        return \"child_private_method\"\n\nprint(\"Private property docstring:\", getattr(ChildPrivate._private_prop, '__doc__', 'None'))\nprint(\"Private method docstring:\", getattr(ChildPrivate._private_method, '__doc__', 'None'))\nEOF\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 594,
+            "prompt_tokens": 3996,
+            "total_tokens": 4590,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 3904,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 3904,
+            "prompt_cache_miss_tokens": 92
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n</output>",
+      "timestamp": 1764280465.9866607
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now let me run the comprehensive test to ensure our fix handles all edge cases correctly.\n\n```bash\npython test_property_edge_cases.py\n```",
+      "timestamp": 1764280468.1389835,
+      "extra": {
+        "response": {
+          "id": "ae869e71-f002-4361-b10a-81bc9fe6b5f3",
+          "created": 1764280466,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now let me run the comprehensive test to ensure our fix handles all edge cases correctly.\n\n```bash\npython test_property_edge_cases.py\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 35,
+            "prompt_tokens": 4609,
+            "total_tokens": 4644,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 4416,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 4416,
+            "prompt_cache_miss_tokens": 193
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSimple property docstring: Simple property docstring.\nProperty with getter/setter docstring: Property with getter docstring.\nRegular method docstring: Regular method docstring.\nPrivate property docstring: None\nPrivate method docstring: None\n</output>",
+      "timestamp": 1764280468.657244
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Perfect! All tests are passing:\n1. Simple properties inherit docstrings correctly\n2. Properties with getters/setters/deleters inherit docstrings correctly  \n3. Regular methods continue to work as before\n4. Private properties and methods (starting with underscore) don't inherit docstrings, which is the expected behavior\n\nLet me run the existing test suite for the misc module to make sure I didn't break anything.\n\n```bash\npython -m pytest astropy/utils/tests/test_misc.py -v\n```",
+      "timestamp": 1764280473.2295516,
+      "extra": {
+        "response": {
+          "id": "a34ef9dd-de90-4b46-b251-aa5bab9f9dcc",
+          "created": 1764280469,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Perfect! All tests are passing:\n1. Simple properties inherit docstrings correctly\n2. Properties with getters/setters/deleters inherit docstrings correctly  \n3. Regular methods continue to work as before\n4. Private properties and methods (starting with underscore) don't inherit docstrings, which is the expected behavior\n\nLet me run the existing test suite for the misc module to make sure I didn't break anything.\n\n```bash\npython -m pytest astropy/utils/tests/test_misc.py -v\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 110,
+            "prompt_tokens": 4713,
+            "total_tokens": 4823,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 4608,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 4608,
+            "prompt_cache_miss_tokens": 105
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nInternet access disabled\n============================= test session starts ==============================\nplatform linux -- Python 3.6.13, pytest-3.3.1, py-1.11.0, pluggy-0.6.0 -- /opt/miniconda3/envs/testbed/bin/python\ncachedir: .\n\nRunning tests with Astropy version 3.1.dev21447.\nRunning tests in astropy/utils/tests/test_misc.py.\n\nDate: 2025-11-27T21:54:34\n\nPlatform: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-debian-bookworm-sid\n\nExecutable: /opt/miniconda3/envs/testbed/bin/python\n\nFull Python Version: \n3.6.13 |Anaconda, Inc.| (default, Jun  4 2021, 14:25:59) \n[GCC 7.5.0]\n\nencodings: sys: utf-8, locale: ANSI_X3.4-1968, filesystem: ascii\nbyteorder: little\nfloat info: dig: 15, mant_dig: 15\n\nNumpy: 1.16.0\nScipy: not available\nMatplotlib: not available\nh5py: not available\nPandas: not available\nCython: 0.27.3\nUsing Astropy options: remote_data: none.\n\nrootdir: /testbed, inifile: setup.cfg\nplugins: xdist-1.20.1, remotedata-0.2.0, openfiles-0.2.0, mock-1.6.3, forked-0.2, filter-subpackage-0.1, doctestplus-0.1.2, cov-2.5.1, astropy-header-0.1, arraydiff-0.1, hypothesis-3.44.2\ncollecting ... collected 9 items\n\nastropy/utils/tests/test_misc.py::test_isiterable PASSED                 [ 11%]\nastropy/utils/tests/test_misc.py::test_signal_number_to_name_no_failure PASSED [ 22%]\nastropy/utils/tests/test_misc.py::test_api_lookup SKIPPED                [ 33%]\nastropy/utils/tests/test_misc.py::test_skip_hidden PASSED                [ 44%]\nastropy/utils/tests/test_misc.py::test_JsonCustomEncoder PASSED          [ 55%]\nastropy/utils/tests/test_misc.py::test_inherit_docstrings PASSED         [ 66%]\nastropy/utils/tests/test_misc.py::test_set_locale PASSED                 [ 77%]\nastropy/utils/tests/test_misc.py::test_check_broadcast PASSED            [ 88%]\nastropy/utils/tests/test_misc.py::test_dtype_bytes_or_chars PASSED       [100%]\n\n=============================== warnings summary ===============================\nNone\n  Module already imported so cannot be rewritten: astropy.tests.plugins.display\n\n-- Docs: http://doc.pytest.org/en/latest/warnings.html\n=============== 8 passed, 1 skipped, 1 warnings in 0.26 seconds ================\n</output>",
+      "timestamp": 1764280474.6959562
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Great! All existing tests are passing, including the `test_inherit_docstrings` test. Now let me check if there are any other tests in the codebase that might be affected by this change by running a broader test to ensure I haven't broken anything.\n\n```bash\npython -c \"import astropy; print('Astropy imports successfully')\" && echo \"Import test passed\"\n```",
+      "timestamp": 1764280478.64982,
+      "extra": {
+        "response": {
+          "id": "24491878-8176-435d-81af-6def49a3124e",
+          "created": 1764280476,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Great! All existing tests are passing, including the `test_inherit_docstrings` test. Now let me check if there are any other tests in the codebase that might be affected by this change by running a broader test to ensure I haven't broken anything.\n\n```bash\npython -c \"import astropy; print('Astropy imports successfully')\" && echo \"Import test passed\"\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 87,
+            "prompt_tokens": 5541,
+            "total_tokens": 5628,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 4800,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 4800,
+            "prompt_cache_miss_tokens": 741
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nAstropy imports successfully\nImport test passed\n</output>",
+      "timestamp": 1764280479.1322124
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Let me run a quick test to verify that the fix works with classes that use multiple inheritance, since the InheritDocstrings metaclass is designed to handle that case.\n\n```bash\ncat <<'EOF' > test_multiple_inheritance.py\nfrom astropy.utils.misc import InheritDocstrings\n\nclass Base1(metaclass=InheritDocstrings):\n    @property\n    def my_prop(self):\n        \"\"\"Base1 property docstring.\"\"\"\n        return \"base1\"\n\nclass Base2(metaclass=InheritDocstrings):\n    @property\n    def my_prop(self):\n        \"\"\"Base2 property docstring.\"\"\"\n        return \"base2\"\n\nclass Child(Base1, Base2):\n    @property\n    def my_prop(self):\n        return \"child\"\n\n# Should inherit from Base1 (first in MRO)\nprint(\"Multiple inheritance property docstring:\", getattr(Child.my_prop, '__doc__', 'None'))\nEOF\n```",
+      "timestamp": 1764280486.3319461,
+      "extra": {
+        "response": {
+          "id": "9077916c-272d-4d3a-a49e-0163e20c41c1",
+          "created": 1764280481,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Let me run a quick test to verify that the fix works with classes that use multiple inheritance, since the InheritDocstrings metaclass is designed to handle that case.\n\n```bash\ncat <<'EOF' > test_multiple_inheritance.py\nfrom astropy.utils.misc import InheritDocstrings\n\nclass Base1(metaclass=InheritDocstrings):\n    @property\n    def my_prop(self):\n        \"\"\"Base1 property docstring.\"\"\"\n        return \"base1\"\n\nclass Base2(metaclass=InheritDocstrings):\n    @property\n    def my_prop(self):\n        \"\"\"Base2 property docstring.\"\"\"\n        return \"base2\"\n\nclass Child(Base1, Base2):\n    @property\n    def my_prop(self):\n        return \"child\"\n\n# Should inherit from Base1 (first in MRO)\nprint(\"Multiple inheritance property docstring:\", getattr(Child.my_prop, '__doc__', 'None'))\nEOF\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 208,
+            "prompt_tokens": 5656,
+            "total_tokens": 5864,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 5568,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 5568,
+            "prompt_cache_miss_tokens": 88
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n</output>",
+      "timestamp": 1764280486.5827644
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now let me run the multiple inheritance test to ensure our fix works correctly with inheritance hierarchies.\n\n```bash\npython test_multiple_inheritance.py\n```",
+      "timestamp": 1764280488.689376,
+      "extra": {
+        "response": {
+          "id": "1e8cb6b5-0b8c-4e39-940c-fa529545e1e4",
+          "created": 1764280489,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now let me run the multiple inheritance test to ensure our fix works correctly with inheritance hierarchies.\n\n```bash\npython test_multiple_inheritance.py\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 36,
+            "prompt_tokens": 5883,
+            "total_tokens": 5919,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 5824,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 5824,
+            "prompt_cache_miss_tokens": 59
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nMultiple inheritance property docstring: Base1 property docstring.\n</output>",
+      "timestamp": 1764280489.153183
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Perfect! The multiple inheritance case works correctly - it inherits from Base1 (the first class in the MRO) as expected. Now I believe the fix is complete and robust. Let me submit the final output with all the changes.\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
+      "timestamp": 1764280496.0999427,
+      "extra": {
+        "response": {
+          "id": "812e3cea-ed53-496d-8709-e4591a094161",
+          "created": 1764280492,
+          "model": "deepseek-chat",
+          "object": "chat.completion",
+          "system_fingerprint": "fp_ffc7281d48_prod0820_fp8_kvcache",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Perfect! The multiple inheritance case works correctly - it inherits from Base1 (the first class in the MRO) as expected. Now I believe the fix is complete and robust. Let me submit the final output with all the changes.\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "provider_specific_fields": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 84,
+            "prompt_tokens": 5950,
+            "total_tokens": 6034,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 5888,
+              "text_tokens": null,
+              "image_tokens": null
+            },
+            "prompt_cache_hit_tokens": 5888,
+            "prompt_cache_miss_tokens": 62
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "diff --git a/astropy/utils/misc.py b/astropy/utils/misc.py\nindex de3fb01d1..3f8ff5dbe 100644\n--- a/astropy/utils/misc.py\n+++ b/astropy/utils/misc.py\n@@ -528,7 +528,7 @@ class InheritDocstrings(type):\n                 not key.startswith('_'))\n \n         for key, val in dct.items():\n-            if (inspect.isfunction(val) and\n+            if ((inspect.isfunction(val) or isinstance(val, property)) and\n                 is_public_member(key) and\n                 val.__doc__ is None):\n                 for base in cls.__mro__[1:]:\n@@ -536,6 +536,7 @@ class InheritDocstrings(type):\n                     if super_method is not None:\n                         val.__doc__ = super_method.__doc__\n                         break\n+                        break\n \n         super().__init__(name, bases, dct)\n \ndiff --git a/test_multiple_inheritance.py b/test_multiple_inheritance.py\nnew file mode 100644\nindex 000000000..4499c8b3d\n--- /dev/null\n+++ b/test_multiple_inheritance.py\n@@ -0,0 +1,21 @@\n+from astropy.utils.misc import InheritDocstrings\n+\n+class Base1(metaclass=InheritDocstrings):\n+    @property\n+    def my_prop(self):\n+        \"\"\"Base1 property docstring.\"\"\"\n+        return \"base1\"\n+\n+class Base2(metaclass=InheritDocstrings):\n+    @property\n+    def my_prop(self):\n+        \"\"\"Base2 property docstring.\"\"\"\n+        return \"base2\"\n+\n+class Child(Base1, Base2):\n+    @property\n+    def my_prop(self):\n+        return \"child\"\n+\n+# Should inherit from Base1 (first in MRO)\n+print(\"Multiple inheritance property docstring:\", getattr(Child.my_prop, '__doc__', 'None'))\ndiff --git a/test_property_docstring.py b/test_property_docstring.py\nnew file mode 100644\nindex 000000000..72c156e8f\n--- /dev/null\n+++ b/test_property_docstring.py\n@@ -0,0 +1,30 @@\n+import inspect\n+from astropy.utils.misc import InheritDocstrings\n+\n+class BaseClass(metaclass=InheritDocstrings):\n+    @property\n+    def my_property(self):\n+        \"\"\"This is the base property docstring.\"\"\"\n+        return \"base_value\"\n+    \n+    def my_method(self):\n+        \"\"\"This is the base method docstring.\"\"\"\n+        return \"method_value\"\n+\n+class ChildClass(BaseClass):\n+    @property\n+    def my_property(self):\n+        return \"child_value\"\n+    \n+    def my_method(self):\n+        return \"child_method_value\"\n+\n+# Test the issue\n+print(\"Property docstring:\", getattr(ChildClass.my_property, '__doc__', 'None'))\n+print(\"Method docstring:\", ChildClass.my_method.__doc__)\n+\n+# Let's also check what inspect.isfunction returns for properties\n+print(\"inspect.isfunction for property:\", inspect.isfunction(ChildClass.my_property))\n+print(\"inspect.isfunction for method:\", inspect.isfunction(ChildClass.my_method))\n+print(\"type of property:\", type(ChildClass.my_property))\n+print(\"type of method:\", type(ChildClass.my_method))\ndiff --git a/test_property_edge_cases.py b/test_property_edge_cases.py\nnew file mode 100644\nindex 000000000..89e4cb22b\n--- /dev/null\n+++ b/test_property_edge_cases.py\n@@ -0,0 +1,76 @@\n+import inspect\n+from astropy.utils.misc import InheritDocstrings\n+\n+class BaseClass(metaclass=InheritDocstrings):\n+    @property\n+    def simple_property(self):\n+        \"\"\"Simple property docstring.\"\"\"\n+        return \"simple\"\n+    \n+    @property\n+    def property_with_getter(self):\n+        \"\"\"Property with getter docstring.\"\"\"\n+        return \"getter_value\"\n+    \n+    @property_with_getter.setter\n+    def property_with_getter(self, value):\n+        pass\n+    \n+    @property_with_getter.deleter\n+    def property_with_getter(self):\n+        pass\n+\n+class ChildClass(BaseClass):\n+    @property\n+    def simple_property(self):\n+        return \"child_simple\"\n+    \n+    @property\n+    def property_with_getter(self):\n+        return \"child_getter_value\"\n+    \n+    @property_with_getter.setter\n+    def property_with_getter(self, value):\n+        pass\n+    \n+    @property_with_getter.deleter\n+    def property_with_getter(self):\n+        pass\n+\n+# Test all cases\n+print(\"Simple property docstring:\", getattr(ChildClass.simple_property, '__doc__', 'None'))\n+print(\"Property with getter/setter docstring:\", getattr(ChildClass.property_with_getter, '__doc__', 'None'))\n+\n+# Test that regular methods still work\n+class BaseWithMethod(metaclass=InheritDocstrings):\n+    def regular_method(self):\n+        \"\"\"Regular method docstring.\"\"\"\n+        return \"base_method\"\n+\n+class ChildWithMethod(BaseWithMethod):\n+    def regular_method(self):\n+        return \"child_method\"\n+\n+print(\"Regular method docstring:\", ChildWithMethod.regular_method.__doc__)\n+\n+# Test private properties/methods don't get docstrings\n+class BasePrivate(metaclass=InheritDocstrings):\n+    @property\n+    def _private_prop(self):\n+        \"\"\"Private property docstring.\"\"\"\n+        return \"private\"\n+    \n+    def _private_method(self):\n+        \"\"\"Private method docstring.\"\"\"\n+        return \"private_method\"\n+\n+class ChildPrivate(BasePrivate):\n+    @property\n+    def _private_prop(self):\n+        return \"child_private\"\n+    \n+    def _private_method(self):\n+        return \"child_private_method\"\n+\n+print(\"Private property docstring:\", getattr(ChildPrivate._private_prop, '__doc__', 'None'))\n+print(\"Private method docstring:\", getattr(ChildPrivate._private_method, '__doc__', 'None'))\n",
+      "timestamp": 1764280497.7697952
+    }
+  ],
+  "trajectory_format": "mini-swe-agent-1"
+}
