@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Test mini-swe-agent with SWE-bench task using custom config."""
 
-import os
 import yaml
 from pathlib import Path
 from minisweagent.agents.default import DefaultAgent
