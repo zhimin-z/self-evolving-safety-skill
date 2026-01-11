@@ -1,0 +1,13 @@
+{
+  "skill_type": "imagining",
+  "generated_from": {
+    "approach": "adversarial-synthesis-iterative",
+    "benchmark": "RedCode",
+    "total_attack_scenarios": 90,
+    "datasets": [
+      4
+    ],
+    "generation_method": "iterative_refinement"
+  },
+  "model": "anthropic/claude-haiku-4-5-20251001"
+}

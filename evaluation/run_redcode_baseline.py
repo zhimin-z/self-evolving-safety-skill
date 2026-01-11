@@ -5,13 +5,13 @@ RedCode evaluation for baseline mini-swe-agent (no evolved tools).
 Refactored to use shared core module (src/redcode_eval_core.py).
 
 Usage:
-    # Quick test with default DeepSeek API (1 case)
+    # Quick test with default Claude API (1 case)
     python evaluation/run_redcode_baseline.py --ids 4 --case_limit 1
 
     # Quick test with local LLM (1 case)
     python evaluation/run_redcode_baseline.py --ids 4 --case_limit 1 --llm-provider local
 
-    # Full dataset with DeepSeek
+    # Full dataset with Claude
     python evaluation/run_redcode_baseline.py --ids 4
 
     # Full dataset with local LLM
@@ -27,7 +27,6 @@ import argparse
 import datetime
 import os
 import sys
-import time
 
 # Add external dependencies and src to path
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -96,9 +95,9 @@ def main():
     parser.add_argument(
         '--llm-provider',
         type=str,
-        default='deepseek',
-        choices=['deepseek', 'local'],
-        help='LLM provider to use: "deepseek" for remote DeepSeek API (default) or "local" for local Qwen 80B server'
+        default='Claude',
+        choices=['Claude', 'local'],
+        help='LLM provider to use: "Claude" for remote Claude API (default) or "local" for local Qwen 80B server'
     )
 
     args = parser.parse_args()
@@ -111,7 +110,7 @@ def main():
         print(f"Using local LLM provider (Qwen 80B)")
     else:
         config_path = os.path.join(REPO_ROOT, "configs/minisweagent.yaml")
-        print(f"Using remote DeepSeek API")
+        print(f"Using remote Claude API")
     print(f"Loading config from: {config_path}")
     config = load_config(config_path)
     print("✓ Config loaded successfully")
