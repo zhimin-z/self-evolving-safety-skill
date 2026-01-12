@@ -13,7 +13,7 @@ This directory contains **three complementary security skills** for defending co
 
 ## The Three Approaches
 
-### 1. Plan A: Reactive Learning (Bottom-Up from Failures)
+### 1. Method A: Reactive Learning (Bottom-Up from Failures)
 
 **Philosophy:** Learn from what actually failed in practice.
 
@@ -35,7 +35,7 @@ This directory contains **three complementary security skills** for defending co
 
 ---
 
-### 2. Plan B: Constitutional Alignment (Top-Down from Principles)
+### 2. Method B: Constitutional Alignment (Top-Down from Principles)
 
 **Philosophy:** Derive rules from established safety standards.
 
@@ -57,7 +57,7 @@ This directory contains **three complementary security skills** for defending co
 
 ---
 
-### 3. Plan C: Adversarial Synthesis (Bench-to-Skill Iteration)
+### 3. Method C: Adversarial Synthesis (Bench-to-Skill Iteration)
 
 **Philosophy:** For each attack, imagine "What technical check would stop this?"
 
@@ -106,15 +106,15 @@ security-skills/
 ├── constitutional_principles.json         # Distilled principles
 ├── imagining_countermeasures.json         # (future) Countermeasure catalog
 │
-├── redcode-reactive-defense/              # Plan A: Reactive Learning
+├── redcode-reactive-defense/              # Method A: Reactive Learning
 │   ├── SKILL.md                          # 385 lines - intent detection
 │   └── metadata.json                     # 2388 failures, 26 datasets
 │
-├── redcode-constitutional-defense/        # Plan B: Constitutional Alignment
+├── redcode-constitutional-defense/        # Method B: Constitutional Alignment
 │   ├── SKILL.md                          # ~24KB - principled rules
 │   └── metadata.json                     # 15 principles from 3 standards
 │
-└── redcode-imagining-defense/             # Plan C: Adversarial Synthesis
+└── redcode-imagining-defense/             # Method C: Adversarial Synthesis
     ├── SKILL.md                          # 614 lines - procedural barriers
     └── metadata.json                     # 90 attacks, iterative refinement
 ```

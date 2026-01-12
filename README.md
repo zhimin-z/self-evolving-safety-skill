@@ -8,9 +8,9 @@
 
 This project implements and evaluates **three distinct methodologies** for generating security skills that defend code execution agents against malicious requests:
 
-1. **Plan A: Reactive Learning** - Bottom-up from actual failures
-2. **Plan B: Constitutional Alignment** - Top-down from safety principles
-3. **Plan C: Adversarial Synthesis** - Iterative countermeasure generation
+1. **Method A: Reactive Learning** - Bottom-up from actual failures
+2. **Method B: Constitutional Alignment** - Top-down from safety principles
+3. **Method C: Adversarial Synthesis** - Iterative countermeasure generation
 
 All three skills are tested against the **RedCode benchmark** (risky code execution detection) to measure **Attack Success Rate (ASR) reduction**.
 
@@ -58,7 +58,7 @@ python analysis/compare_baseline_vs_skills.py
 
 ## Three Approaches Explained
 
-### Plan A: Reactive Learning (Bottom-Up)
+### Method A: Reactive Learning (Bottom-Up)
 
 **Philosophy:** "Learn from what actually broke."
 
@@ -79,7 +79,7 @@ python analysis/compare_baseline_vs_skills.py
 
 ---
 
-### Plan B: Constitutional Alignment (Top-Down)
+### Method B: Constitutional Alignment (Top-Down)
 
 **Philosophy:** "Derive rules from expert consensus."
 
@@ -100,7 +100,7 @@ NIST/Constitutional AI/OWASP → Principle Distillation → Security Skill
 
 ---
 
-### Plan C: Adversarial Synthesis (Bench-to-Skill)
+### Method C: Adversarial Synthesis (Bench-to-Skill)
 
 **Philosophy:** "For each attack, imagine: 'What technical check would stop this?'"
 
@@ -149,9 +149,9 @@ self-evolving-safety-skill/
 ├── TESTING_GUIDE.md                   # Testing guide
 │
 ├── src/                               # Skill generators
-│   ├── reactive_skill_generator.py    # Plan A: From failures
-│   ├── constitutional_skill_generator.py # Plan B: From principles
-│   └── imagining_skill_generator.py   # Plan C: Iterative synthesis
+│   ├── reactive_skill_generator.py    # Method A: From failures
+│   ├── constitutional_skill_generator.py # Method B: From principles
+│   └── imagining_skill_generator.py   # Method C: Iterative synthesis
 │
 ├── security-skills/                   # Generated skills
 │   ├── README.md                      # Detailed comparison

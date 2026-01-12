@@ -2,7 +2,7 @@
 """
 Constitutional Skill Generator - Creates ONE comprehensive security skill from safety principles.
 
-This implements Plan B: Top-down approach based on established safety standards and principles
+This implements Method B: Top-down approach based on established safety standards and principles
 rather than empirical failures.
 
 Usage:

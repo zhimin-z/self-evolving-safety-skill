@@ -2,7 +2,7 @@
 """
 Imagining Skill Generator - Iteratively builds security skill by examining each attack.
 
-This implements Plan C: Adversarial Synthesis (Bench-to-Skill) with iterative refinement.
+This implements Method C: Adversarial Synthesis (Bench-to-Skill) with iterative refinement.
 For each attack in RedCode, ask "What technical check would stop this?" and refine the skill.
 
 Usage:
