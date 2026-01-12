@@ -2,7 +2,7 @@
 """
 RedCode evaluation for mini-swe-agent WITH security skills.
 
-Tests the agent with reactive, constitutional, or imagining defense skill to measure ASR reduction.
+Tests the agent with reactive, constitutional, or proactive defense skill to measure ASR reduction.
 
 Usage:
     # Quick test with reactive skill (default - bottom-up from failures)
@@ -11,8 +11,8 @@ Usage:
     # Test with constitutional skill (top-down from principles)
     python evaluation/run_redcode_with_skills.py --skill_type constitutional --ids 4 --case_limit 1
 
-    # Test with imagining skill (adversarial synthesis)
-    python evaluation/run_redcode_with_skills.py --skill_type imagining --ids 4 --case_limit 1
+    # Test with proactive skill (adversarial synthesis)
+    python evaluation/run_redcode_with_skills.py --skill_type proactive --ids 4 --case_limit 1
 
     # Full dataset 4 with reactive skill
     python evaluation/run_redcode_with_skills.py --ids 4
@@ -20,8 +20,8 @@ Usage:
     # Full dataset 4 with constitutional skill
     python evaluation/run_redcode_with_skills.py --skill_type constitutional --ids 4
 
-    # Full dataset 4 with imagining skill
-    python evaluation/run_redcode_with_skills.py --skill_type imagining --ids 4
+    # Full dataset 4 with proactive skill
+    python evaluation/run_redcode_with_skills.py --skill_type proactive --ids 4
 
     # Specify custom skill directory
     python evaluation/run_redcode_with_skills.py --ids 4 --skills_dir security-skills
@@ -63,18 +63,18 @@ def load_skill(skills_dir: str, skill_type: str = "reactive") -> str:
 
     Args:
         skills_dir: Directory containing security skills
-        skill_type: Type of skill to load ('reactive', 'constitutional', or 'imagining')
+        skill_type: Type of skill to load ('reactive', 'constitutional', or 'proactive')
 
     Returns the skill content as a string to be injected into agent's system prompt.
     """
     skill_types = {
         "reactive": ("redcode-reactive-defense", "src/reactive_skill_generator.py"),
         "constitutional": ("redcode-constitutional-defense", "src/constitutional_skill_generator.py"),
-        "imagining": ("redcode-imagining-defense", "src/imagining_skill_generator.py")
+        "proactive": ("redcode-proactive-defense", "src/proactive_skill_generator.py")
     }
 
     if skill_type not in skill_types:
-        raise ValueError(f"Invalid skill_type: {skill_type}. Must be 'reactive', 'constitutional', or 'imagining'")
+        raise ValueError(f"Invalid skill_type: {skill_type}. Must be 'reactive', 'constitutional', or 'proactive'")
 
     skill_dir, generator_script = skill_types[skill_type]
     skill_path = Path(skills_dir) / skill_dir / "SKILL.md"
@@ -109,7 +109,7 @@ def inject_skill_into_config(config: dict, skill_content: str, skill_type: str =
     Args:
         config: Agent configuration dictionary
         skill_content: Skill markdown content
-        skill_type: Type of skill ('reactive', 'constitutional', or 'imagining')
+        skill_type: Type of skill ('reactive', 'constitutional', or 'proactive')
     """
     # Get the current system template
     current_template = config.get("agent", {}).get("system_template", "")
@@ -117,7 +117,7 @@ def inject_skill_into_config(config: dict, skill_content: str, skill_type: str =
     skill_labels = {
         "reactive": "Reactive Malicious Code Defense",
         "constitutional": "Constitutional Malicious Code Defense",
-        "imagining": "Imagining-Based Malicious Code Defense"
+        "proactive": "Proactive-Based Malicious Code Defense"
     }
 
     # Append the skill to the system template
@@ -154,7 +154,7 @@ def main():
     parser.add_argument(
         '--skill_type',
         type=str,
-        choices=['reactive', 'constitutional', 'imagining'],
+        choices=['reactive', 'constitutional', 'proactive'],
         default='reactive',
         help='Type of security skill to load (default: reactive)'
     )

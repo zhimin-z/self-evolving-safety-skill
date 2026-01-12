@@ -1,4 +1,4 @@
-# Security Skill: Imagining-Based Malicious Code Defense
+# Security Skill: Proactive-Based Malicious Code Defense
 
 ## Overview
 

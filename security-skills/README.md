@@ -5,7 +5,7 @@ This directory contains **three complementary security skills** for defending co
 ## Overview
 
 **Generated:** 2026-01-11
-**Approaches:** Reactive (bottom-up) + Constitutional (top-down) + Imagining (adversarial synthesis)
+**Approaches:** Reactive (bottom-up) + Constitutional (top-down) + Proactive (adversarial synthesis)
 **Benchmark:** RedCode (risky code execution detection)
 **Format:** Agent Skills specification (YAML + Markdown)
 
@@ -76,13 +76,13 @@ This directory contains **three complementary security skills** for defending co
 - ⚠️ Limited to analyzed datasets
 - ⚠️ May be overly specific to training attacks
 
-**Directory:** [redcode-imagining-defense/](redcode-imagining-defense/)
+**Directory:** [redcode-proactive-defense/](redcode-proactive-defense/)
 
 ---
 
 ## Comparison Table
 
-| Dimension | Reactive | Constitutional | Imagining |
+| Dimension | Reactive | Constitutional | Proactive |
 |-----------|----------|----------------|-----------|
 | **Approach** | Bottom-up | Top-down | Adversarial synthesis |
 | **Source** | 2388 failures | NIST/Constitutional AI/OWASP | 90 RedCode attacks |
@@ -104,7 +104,7 @@ security-skills/
 ├── REACTIVE_APPROACH.md                   # Why unified > multi-skill
 ├── reactive_skill_summary.json            # Failure analysis
 ├── constitutional_principles.json         # Distilled principles
-├── imagining_countermeasures.json         # (future) Countermeasure catalog
+├── proactive_countermeasures.json         # (future) Countermeasure catalog
 │
 ├── redcode-reactive-defense/              # Method A: Reactive Learning
 │   ├── SKILL.md                          # 385 lines - intent detection
@@ -114,7 +114,7 @@ security-skills/
 │   ├── SKILL.md                          # ~24KB - principled rules
 │   └── metadata.json                     # 15 principles from 3 standards
 │
-└── redcode-imagining-defense/             # Method C: Adversarial Synthesis
+└── redcode-proactive-defense/             # Method C: Adversarial Synthesis
     ├── SKILL.md                          # 614 lines - procedural barriers
     └── metadata.json                     # 90 attacks, iterative refinement
 ```
@@ -134,8 +134,8 @@ python evaluation/run_redcode_with_skills.py --skill_type reactive --ids 4 --cas
 # Test constitutional skill (top-down from principles)
 python evaluation/run_redcode_with_skills.py --skill_type constitutional --ids 4 --case_limit 1
 
-# Test imagining skill (adversarial synthesis)
-python evaluation/run_redcode_with_skills.py --skill_type imagining --ids 4 --case_limit 1
+# Test proactive skill (adversarial synthesis)
+python evaluation/run_redcode_with_skills.py --skill_type proactive --ids 4 --case_limit 1
 ```
 
 ### Comparing Results
@@ -145,7 +145,7 @@ python evaluation/run_redcode_with_skills.py --skill_type imagining --ids 4 --ca
 python evaluation/run_redcode_baseline.py --ids 4
 
 # Run all three skills
-for skill in reactive constitutional imagining; do
+for skill in reactive constitutional proactive; do
   python evaluation/run_redcode_with_skills.py --skill_type $skill --ids 4
 done
 
@@ -169,9 +169,9 @@ python src/constitutional_skill_generator.py \
   --output_dir security-skills
 ```
 
-**Imagining Skill (from benchmark):**
+**Proactive Skill (from benchmark):**
 ```bash
-python src/imagining_skill_generator.py \
+python src/proactive_skill_generator.py \
   --dataset_ids 4 5 6 7 \
   --batch_size 30 \
   --output_dir security-skills
@@ -198,7 +198,7 @@ python src/imagining_skill_generator.py \
 - Are principled rules too broad or too narrow?
 - How well do NIST/OWASP principles transfer to code agents?
 
-**Imagining:**
+**Proactive:**
 - How specific are procedural barriers?
 - Do iteratively refined checks over-fit to training data?
 
@@ -236,10 +236,10 @@ python src/imagining_skill_generator.py \
 }
 ```
 
-### Imagining Skill
+### Proactive Skill
 ```json
 {
-  "skill_type": "imagining",
+  "skill_type": "proactive",
   "generated_from": {
     "approach": "adversarial-synthesis-iterative",
     "total_attack_scenarios": 90,
@@ -282,7 +282,7 @@ See [REACTIVE_APPROACH.md](REACTIVE_APPROACH.md) for detailed discussion.
 **Generators:**
 - [../src/reactive_skill_generator.py](../src/reactive_skill_generator.py)
 - [../src/constitutional_skill_generator.py](../src/constitutional_skill_generator.py)
-- [../src/imagining_skill_generator.py](../src/imagining_skill_generator.py)
+- [../src/proactive_skill_generator.py](../src/proactive_skill_generator.py)
 
 **Evaluation:**
 - [../evaluation/run_redcode_with_skills.py](../evaluation/run_redcode_with_skills.py)

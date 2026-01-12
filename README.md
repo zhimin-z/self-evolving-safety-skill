@@ -47,8 +47,8 @@ python evaluation/run_redcode_with_skills.py --skill_type reactive --ids 4 --cas
 # Test constitutional skill
 python evaluation/run_redcode_with_skills.py --skill_type constitutional --ids 4 --case_limit 1
 
-# Test imagining skill
-python evaluation/run_redcode_with_skills.py --skill_type imagining --ids 4 --case_limit 1
+# Test proactive skill
+python evaluation/run_redcode_with_skills.py --skill_type proactive --ids 4 --case_limit 1
 
 # Compare results
 python analysis/compare_baseline_vs_skills.py
@@ -118,15 +118,15 @@ RedCode Attack → "What blocks this?" → Procedural Barrier → Iterate
 
 **Key Insight:** Iterative refinement builds technical specificity.
 
-**Generator:** [`src/imagining_skill_generator.py`](src/imagining_skill_generator.py)
+**Generator:** [`src/proactive_skill_generator.py`](src/proactive_skill_generator.py)
 **Model:** Claude Haiku 4.5 (efficient for iterations)
-**Output:** [security-skills/redcode-imagining-defense/](security-skills/redcode-imagining-defense/)
+**Output:** [security-skills/redcode-proactive-defense/](security-skills/redcode-proactive-defense/)
 
 ---
 
 ## Comparison Matrix
 
-| Dimension | Reactive | Constitutional | Imagining |
+| Dimension | Reactive | Constitutional | Proactive |
 |-----------|----------|----------------|-----------|
 | **Approach** | Bottom-up (empirical) | Top-down (principled) | Adversarial synthesis |
 | **Source** | 2388 failures, 26 datasets | NIST/Constitutional AI/OWASP | 90 attacks, dataset 4 |
@@ -151,13 +151,13 @@ self-evolving-safety-skill/
 ├── src/                               # Skill generators
 │   ├── reactive_skill_generator.py    # Method A: From failures
 │   ├── constitutional_skill_generator.py # Method B: From principles
-│   └── imagining_skill_generator.py   # Method C: Iterative synthesis
+│   └── proactive_skill_generator.py   # Method C: Iterative synthesis
 │
 ├── security-skills/                   # Generated skills
 │   ├── README.md                      # Detailed comparison
 │   ├── redcode-reactive-defense/      # 385 lines - intent detection
 │   ├── redcode-constitutional-defense/ # ~24KB - principled rules
-│   └── redcode-imagining-defense/     # 614 lines - procedural barriers
+│   └── redcode-proactive-defense/     # 614 lines - procedural barriers
 │
 ├── evaluation/                        # Evaluation scripts
 │   ├── run_redcode_baseline.py        # Baseline (no skill)
@@ -198,7 +198,7 @@ self-evolving-safety-skill/
 - Do NIST/OWASP principles transfer well to code agents?
 - Are rules too broad or too narrow?
 
-**Imagining:**
+**Proactive:**
 - Do procedural barriers overfit to training data?
 - How specific is "too specific"?
 
@@ -269,11 +269,11 @@ python src/constitutional_skill_generator.py \
   --output_dir security-skills
 ```
 
-### Imagining Skill (from benchmark)
+### Proactive Skill (from benchmark)
 
 ```bash
 # Iteratively build from RedCode attacks
-python src/imagining_skill_generator.py \
+python src/proactive_skill_generator.py \
   --dataset_ids 4 5 6 7 \
   --batch_size 30 \
   --output_dir security-skills
@@ -290,10 +290,10 @@ python evaluation/run_redcode_baseline.py --ids 4
 # 2. Generate skills (if not already done)
 python src/reactive_skill_generator.py
 python src/constitutional_skill_generator.py
-python src/imagining_skill_generator.py --dataset_ids 4
+python src/proactive_skill_generator.py --dataset_ids 4
 
 # 3. Evaluate each skill
-for skill in reactive constitutional imagining; do
+for skill in reactive constitutional proactive; do
   python evaluation/run_redcode_with_skills.py \
     --skill_type $skill \
     --ids 4

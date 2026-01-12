@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Imagining Skill Generator - Iteratively builds security skill by examining each attack.
+Proactive Skill Generator - Iteratively builds security skill by examining each attack.
 
 This implements Method C: Adversarial Synthesis (Bench-to-Skill) with iterative refinement.
 For each attack in RedCode, ask "What technical check would stop this?" and refine the skill.
 
 Usage:
-    python src/imagining_skill_generator.py --dataset_ids 4 5 6 7
+    python src/proactive_skill_generator.py --dataset_ids 4 5 6 7
 """
 
 import argparse
@@ -22,11 +22,11 @@ load_dotenv()
 
 # Initial skill template to start refinement
 INITIAL_SKILL_TEMPLATE = """---
-name: redcode-imagining-defense
+name: redcode-proactive-defense
 description: Adversarial synthesis security skill with technical countermeasures imagined from RedCode benchmark attack scenarios
 ---
 
-# Security Skill: Imagining-Based Malicious Code Defense
+# Security Skill: Proactive-Based Malicious Code Defense
 
 ## Overview
 
@@ -60,7 +60,7 @@ Safe alternative: [If applicable, suggest safer approach]
 
 ---
 
-**This imagining skill is built incrementally by analyzing attack scenarios and imagining defenses.**
+**This proactive skill is built incrementally by analyzing attack scenarios and proactive defenses.**
 """
 
 
@@ -241,9 +241,9 @@ def iteratively_build_skill(attacks: List[Dict], batch_size: int = 30) -> str:
     return current_skill
 
 
-def save_imagining_skill(skill_content: str, total_attacks: int, dataset_ids: List[int], output_dir: str):
-    """Save the imagining skill to Agent Skills directory."""
-    skill_dir = Path(output_dir) / "redcode-imagining-defense"
+def save_proactive_skill(skill_content: str, total_attacks: int, dataset_ids: List[int], output_dir: str):
+    """Save the proactive skill to Agent Skills directory."""
+    skill_dir = Path(output_dir) / "redcode-proactive-defense"
     skill_dir.mkdir(parents=True, exist_ok=True)
 
     # Save SKILL.md
@@ -255,7 +255,7 @@ def save_imagining_skill(skill_content: str, total_attacks: int, dataset_ids: Li
     metadata_file = skill_dir / "metadata.json"
     with open(metadata_file, "w") as f:
         json.dump({
-            "skill_type": "imagining",
+            "skill_type": "proactive",
             "generated_from": {
                 "approach": "adversarial-synthesis-iterative",
                 "benchmark": "RedCode",
@@ -266,14 +266,14 @@ def save_imagining_skill(skill_content: str, total_attacks: int, dataset_ids: Li
             "model": "anthropic/claude-haiku-4-5-20251001"
         }, f, indent=2)
 
-    print(f"\n✓ Saved imagining skill to: {skill_dir}")
+    print(f"\n✓ Saved proactive skill to: {skill_dir}")
     print(f"  - Skill file: {skill_file}")
     print(f"  - Metadata: {metadata_file}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate imagining security skill from RedCode benchmark (iterative refinement)"
+        description="Generate proactive security skill from RedCode benchmark (iterative refinement)"
     )
     parser.add_argument(
         "--benchmark_dir",
@@ -298,13 +298,13 @@ def main():
         "--output_dir",
         type=str,
         default="security-skills",
-        help="Output directory for the imagining skill"
+        help="Output directory for the proactive skill"
     )
 
     args = parser.parse_args()
 
     print("="*60)
-    print("Imagining Skill Generator (Iterative Refinement)")
+    print("Proactive Skill Generator (Iterative Refinement)")
     print("="*60)
 
     # Step 1: Load RedCode attack scenarios
@@ -324,13 +324,13 @@ def main():
         return
 
     # Step 2: Iteratively build skill
-    print("\n[2/2] Iteratively building imagining skill...")
+    print("\n[2/2] Iteratively building proactive skill...")
     print(f"  Using: Claude Haiku 4.5 (efficient for many iterations)")
 
     skill_content = iteratively_build_skill(attacks, batch_size=args.batch_size)
 
     if skill_content:
-        save_imagining_skill(
+        save_proactive_skill(
             skill_content,
             len(attacks),
             args.dataset_ids or list(range(1, 28)),
@@ -338,14 +338,14 @@ def main():
         )
 
         print("\n" + "="*60)
-        print("✓ Imagining skill generation complete!")
+        print("✓ Proactive skill generation complete!")
         print("="*60)
         print(f"\nNext steps:")
-        print(f"1. Review: {args.output_dir}/redcode-imagining-defense/SKILL.md")
-        print(f"2. Test: python evaluation/run_redcode_with_skills.py --skill_type imagining --ids 4")
+        print(f"1. Review: {args.output_dir}/redcode-proactive-defense/SKILL.md")
+        print(f"2. Test: python evaluation/run_redcode_with_skills.py --skill_type proactive --ids 4")
         print("="*60)
     else:
-        print("\n✗ Failed to generate imagining skill")
+        print("\n✗ Failed to generate proactive skill")
 
 
 if __name__ == "__main__":
