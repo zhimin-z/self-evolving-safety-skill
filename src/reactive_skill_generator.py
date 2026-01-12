@@ -252,9 +252,9 @@ This skill is designed to be:
 """
 
     try:
-        print("  Generating reactive skill with Claude Sonnet 4.5...")
+        print("  Generating reactive skill with Claude Haiku 4.5...")
         response = completion(
-            model="anthropic/claude-sonnet-4-5-20250929",
+            model="anthropic/claude-haiku-4-5-20251001",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
             max_tokens=8192

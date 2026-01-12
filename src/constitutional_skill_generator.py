@@ -100,9 +100,9 @@ Return a JSON object with distilled principles:
 Generate the distilled principles now:"""
 
     try:
-        print("  Distilling safety principles with Claude Sonnet 4.5...")
+        print("  Distilling safety principles with Claude Haiku 4.5...")
         response = completion(
-            model="anthropic/claude-sonnet-4-5-20250929",
+            model="anthropic/claude-haiku-4-5-20251001",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=4096
@@ -237,9 +237,9 @@ Safe alternative: [If applicable, suggest a safe approach]
 **Generate the complete constitutional skill now, covering all {len(principles_list)} principles:**"""
 
     try:
-        print("  Generating constitutional skill with Claude Sonnet 4.5...")
+        print("  Generating constitutional skill with Claude Haiku 4.5...")
         response = completion(
-            model="anthropic/claude-sonnet-4-5-20250929",
+            model="anthropic/claude-haiku-4-5-20251001",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=8192
