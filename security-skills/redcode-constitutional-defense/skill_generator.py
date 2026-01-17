@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Constitutional Skill Generator - Creates ONE comprehensive security skill from safety principles.
+Security Skill Generator - Iteratively refines ONE skill from safety standards.
 
-This implements Method B: Top-down approach based on established safety standards and principles
+This implements Method B: Top-down approach based on established safety standards and best practices
 rather than empirical failures.
 
 Usage:
@@ -11,233 +11,105 @@ Usage:
 
 import argparse
 import json
-import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, Iterable, List, Tuple
 from dotenv import load_dotenv
 from litellm import completion
 
 load_dotenv()
 
+MAX_SKILL_CHARS = 14000
+CHUNK_SIZE_CHARS = 6000
+
 
 def load_safety_documents(standards_dir: str) -> List[Dict[str, str]]:
-    """Load all safety standard documents from the directory."""
+    """Load all readable safety standard documents from the directory."""
     documents = []
     standards_path = Path(standards_dir)
 
     if not standards_path.exists():
         raise FileNotFoundError(f"Safety standards directory not found: {standards_dir}")
 
-    # Load markdown files
-    for md_file in standards_path.glob("*.md"):
-        with open(md_file, 'r') as f:
-            documents.append({
-                "source": md_file.name,
-                "type": "markdown",
-                "content": f.read()
-            })
+    for file_path in sorted(p for p in standards_path.rglob("*") if p.is_file()):
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
 
-    # Load text files
-    for txt_file in standards_path.glob("*.txt"):
-        with open(txt_file, 'r') as f:
-            documents.append({
-                "source": txt_file.name,
-                "type": "text",
-                "content": f.read()
-            })
+        if not content.strip():
+            continue
+
+        documents.append({
+            "source": file_path.name,
+            "type": file_path.suffix.lstrip(".") or "unknown",
+            "content": content
+        })
 
     print(f"  ✓ Loaded {len(documents)} safety documents")
     return documents
 
 
-def distill_safety_principles(documents: List[Dict[str, str]]) -> Dict:
+def iter_chunks(text: str, chunk_size: int) -> Iterable[Tuple[int, int, str]]:
+    """Yield fixed-size chunks with (index, total, content)."""
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+
+    total = max(1, (len(text) + chunk_size - 1) // chunk_size)
+    for index, start in enumerate(range(0, len(text), chunk_size), start=1):
+        yield index, total, text[start:start + chunk_size]
+
+
+def generate_initial_skill(chunk_text: str, source_name: str) -> str:
     """
-    Extract actionable safety principles from safety documents.
-
-    Uses LLM to distill abstract principles into concrete behavioral rules.
+    Generate an initial security skill from a single document chunk.
     """
-    # Combine all documents
-    doc_summary = "\n\n".join([
-        f"=== {doc['source']} ===\n{doc['content'][:2000]}..."  # First 2000 chars
-        for doc in documents
-    ])
-
-    prompt = f"""You are a safety expert analyzing security standards for code generation agents.
-
-**Task:** Extract actionable safety principles from these documents and convert them to
-concrete behavioral rules for a code agent that executes user requests.
-
-**Documents:**
-{doc_summary}
+    prompt = f"""You are a security expert creating a security skill for AI code agents.
 
 **Context:**
-- The agent is a coding assistant that can execute bash commands, read/write files, and run code
-- Malicious users may try to trick it into executing harmful operations
-- Focus on principles that prevent: unauthorized file access, process manipulation, privilege escalation, data exfiltration
+We are iteratively building one skill from multiple safety standards. Start with the excerpt below.
+The goal is to minimize agent attack surface and secure AI agent architectures beyond prompt injection.
 
-**Output Format:**
-Return a JSON object with distilled principles:
-
-{{
-  "principles": [
-    {{
-      "id": "CP001",
-      "source": "NIST AI RMF / Constitutional AI / OWASP",
-      "abstract_principle": "Original high-level principle from document",
-      "concrete_rule": "Specific behavioral rule for code agent in imperative form",
-      "examples": ["Example scenario 1", "Example scenario 2"]
-    }},
-    ...
-  ]
-}}
-
-**Requirements:**
-1. Extract 10-15 most relevant principles
-2. Make rules ACTIONABLE and SPECIFIC to code execution context
-3. Cover different attack vectors (file access, system modification, process control, data exfiltration)
-4. Focus on INTENT detection, not just syntax patterns
-
-Generate the distilled principles now:"""
-
-    try:
-        print("  Distilling safety principles with Claude Haiku 4.5...")
-        response = completion(
-            model="anthropic/claude-haiku-4-5-20251001",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=4096
-        )
-
-        content = response.choices[0].message.content
-
-        # Extract JSON from response
-        if "```json" in content:
-            json_start = content.find("```json") + 7
-            json_end = content.find("```", json_start)
-            json_str = content[json_start:json_end].strip()
-        elif "```" in content:
-            json_start = content.find("```") + 3
-            json_end = content.find("```", json_start)
-            json_str = content[json_start:json_end].strip()
-        else:
-            json_str = content.strip()
-
-        principles = json.loads(json_str)
-        print(f"  ✓ Distilled {len(principles.get('principles', []))} safety principles")
-        return principles
-
-    except Exception as e:
-        print(f"✗ Error distilling principles: {e}")
-        return None
-
-
-def generate_constitutional_skill(principles: Dict) -> str:
-    """
-    Generate a unified constitutional skill from distilled principles.
-
-    Returns the skill content in Agent Skills format (YAML + Markdown).
-    """
-    principles_list = principles.get("principles", [])
-
-    # Format principles for the prompt
-    principles_text = "\n\n".join([
-        f"**{p['id']}** (from {p['source']})\n"
-        f"- Abstract: {p['abstract_principle']}\n"
-        f"- Concrete Rule: {p['concrete_rule']}\n"
-        f"- Examples: {', '.join(p['examples'])}"
-        for p in principles_list
-    ])
-
-    prompt = f"""You are a security expert creating a CONSTITUTIONAL security skill for code agents.
-
-**Context:**
-We have distilled {len(principles_list)} safety principles from established standards (NIST AI RMF, Constitutional AI, OWASP LLM Top 10).
-These principles represent TOP-DOWN safety guidance based on expert consensus, not empirical failures.
-
-**Distilled Principles:**
-{principles_text}
+**Source:** {source_name}
+**Excerpt:**
+{chunk_text}
 
 **Your task:** Generate a SINGLE comprehensive security skill that:
-1. **Covers ALL principles** in a unified framework
-2. **Detects malicious INTENT**, not just syntax patterns
-3. **Is format-agnostic** - works regardless of how requests are presented
-4. **Provides clear detection criteria and refusal templates**
+1. Minimizes attack surface across tools, memory, autonomy, and multi-agent systems
+2. Detects malicious intent, not just syntax patterns
+3. Is format-agnostic regardless of request presentation
+4. Provides concrete controls, validation steps, and refusal guidance
+5. Stays under {MAX_SKILL_CHARS} characters and avoids duplication
 
 **Output Format (Agent Skills Spec - YAML + Markdown):**
 
 ---
-name: redcode-constitutional-defense
-description: Constitutional security skill based on established safety principles (NIST, Constitutional AI, OWASP) that detects and refuses malicious code execution requests
+name: ai-agent-security-skill
+description: Security skill that minimizes AI agent attack surface and blocks unsafe actions
 ---
 
-# Security Skill: Constitutional Malicious Code Defense
+# Security Skill: AI Agent Security
 
 ## Overview
-[Brief overview synthesizing the constitutional principles]
+[Brief overview synthesizing the best practices and goals]
 
-## Constitutional Principles
+## Threat Model & Attack Surface
+[Key risks and the surfaces they target]
 
-This skill implements safety principles from:
-- NIST AI Risk Management Framework
-- Anthropic's Constitutional AI
-- OWASP LLM Top 10
+## Security Controls
+[Controls across tools, input validation, memory, HITL, output validation, monitoring, multi-agent, data protection]
 
-**Core Principle:** [ONE unified principle that encompasses all constitutional guidance]
-
-## Detection Criteria
-
-Refuse requests that violate constitutional safety principles:
-
-### 1. [Principle Category 1]
-**Principle:** [Abstract principle from standards]
-
-**Detection criteria:**
-- [Specific pattern 1]
-- [Specific pattern 2]
-- [Specific pattern 3]
-
-**Examples:**
-- ✗ Malicious: "[Example]"
-- ✓ Safe alternative: "[Alternative]"
-
-### 2. [Principle Category 2]
-...
-
-[Continue for all principle categories]
-
-## Refusal Template
-
-When detecting a violation of constitutional principles:
-
-```
-I cannot assist with this request as it violates established safety principles:
-
-[Specific principle violated]: [Explanation]
-
-This falls under [NIST/Constitutional AI/OWASP category].
-
-Safe alternative: [If applicable, suggest a safe approach]
-```
+## Detection & Refusal Guidance
+[Criteria for refusing/asking clarification and safe alternatives]
 
 ## Edge Cases
+[Guidance for legitimate admin tasks, educational context, ambiguous requests]
 
-### Legitimate Administrative Tasks
-[Guidance on distinguishing legitimate sysadmin tasks from attacks]
-
-### Educational Context
-[How to handle "for research purposes" requests]
-
-### Ambiguous Requests
-[When to ask for clarification vs refuse]
-
----
-
-**This constitutional skill provides principled protection based on expert consensus and established safety standards.**
-
-**Generate the complete constitutional skill now, covering all {len(principles_list)} principles:**"""
+Generate the complete security skill now:"""
 
     try:
-        print("  Generating constitutional skill with Claude Haiku 4.5...")
+        print("  Generating initial skill with Claude Haiku 4.5...")
         response = completion(
             model="anthropic/claude-haiku-4-5-20251001",
             messages=[{"role": "user", "content": prompt}],
@@ -245,26 +117,68 @@ Safe alternative: [If applicable, suggest a safe approach]
             max_tokens=8192
         )
 
-        skill_content = response.choices[0].message.content
-
-        # Extract markdown if wrapped in code blocks
-        if "```markdown" in skill_content:
-            start = skill_content.find("```markdown") + 11
-            end = skill_content.rfind("```")
-            skill_content = skill_content[start:end].strip()
-        elif skill_content.startswith("```"):
-            lines = skill_content.split("\n")
-            skill_content = "\n".join(lines[1:-1])
-
-        return skill_content
+        content = response.choices[0].message.content
+        return extract_markdown(content)
 
     except Exception as e:
-        print(f"✗ Error generating skill: {e}")
+        print(f"✗ Error generating initial skill: {e}")
         return None
 
 
-def save_constitutional_skill(skill_content: str, principles: Dict, output_dir: str):
-    """Save the constitutional skill to Agent Skills directory."""
+def refine_skill(existing_skill: str, chunk_text: str, source_name: str, chunk_index: int, chunk_total: int) -> str:
+    """
+    Refine an existing security skill with a document chunk.
+    """
+    prompt = f"""You are refining an existing security skill for AI code agents.
+
+**Existing Skill (keep format, update in-place):**
+{existing_skill}
+
+**New Source:** {source_name} (chunk {chunk_index}/{chunk_total})
+**Excerpt:**
+{chunk_text}
+
+**Your task:** Refine the existing skill by incorporating any NEW relevant guidance.
+Requirements:
+1. Preserve the YAML + Markdown structure
+2. Avoid duplication or repeated sections
+3. Update/add criteria, examples, or edge cases only if warranted
+4. Keep the final skill under {MAX_SKILL_CHARS} characters
+5. If the excerpt adds nothing new, return the skill unchanged
+
+Return ONLY the updated skill content:"""
+
+    try:
+        print("  Refining skill with Claude Haiku 4.5...")
+        response = completion(
+            model="anthropic/claude-haiku-4-5-20251001",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=8192
+        )
+
+        content = response.choices[0].message.content
+        return extract_markdown(content)
+
+    except Exception as e:
+        print(f"✗ Error refining skill: {e}")
+        return None
+
+
+def extract_markdown(content: str) -> str:
+    """Extract markdown if wrapped in code blocks."""
+    if "```markdown" in content:
+        start = content.find("```markdown") + 11
+        end = content.rfind("```")
+        return content[start:end].strip()
+    if content.startswith("```"):
+        lines = content.split("\n")
+        return "\n".join(lines[1:-1]).strip()
+    return content.strip()
+
+
+def save_security_skill(skill_content: str, documents: List[Dict[str, str]], output_dir: str):
+    """Save the security skill to Agent Skills directory."""
     skill_dir = Path(output_dir) / "redcode-constitutional-defense"
     skill_dir.mkdir(parents=True, exist_ok=True)
 
@@ -277,21 +191,30 @@ def save_constitutional_skill(skill_content: str, principles: Dict, output_dir: 
     metadata_file = skill_dir / "metadata.json"
     with open(metadata_file, "w") as f:
         json.dump({
-            "skill_type": "constitutional",
+            "skill_type": "ai_agent_security_skill",
             "generated_from": {
                 "approach": "top-down",
-                "sources": list(set([p["source"] for p in principles.get("principles", [])])),
-                "principles_count": len(principles.get("principles", []))
+                "sources": [doc["source"] for doc in documents],
+                "files_count": len(documents),
+                "chunk_size_chars": CHUNK_SIZE_CHARS,
+                "max_skill_chars": MAX_SKILL_CHARS
             },
-            "principles": principles.get("principles", [])
+            "documents": [
+                {
+                    "source": doc["source"],
+                    "type": doc["type"],
+                    "chars": len(doc["content"])
+                }
+                for doc in documents
+            ]
         }, f, indent=2)
 
-    print(f"\n✓ Saved constitutional skill to: {skill_dir}")
+    print(f"\n✓ Saved security skill to: {skill_dir}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate ONE constitutional security skill from safety standards"
+        description="Generate ONE security skill from safety standards"
     )
     parser.add_argument(
         "--standards_dir",
@@ -303,13 +226,13 @@ def main():
         "--output_dir",
         type=str,
         default="security-skills",
-        help="Output directory for the constitutional skill"
+        help="Output directory for the security skill"
     )
 
     args = parser.parse_args()
 
     print("="*60)
-    print("Constitutional Skill Generator")
+    print("Security Skill Generator")
     print("="*60)
 
     # Step 1: Load safety documents
@@ -329,36 +252,38 @@ def main():
         print("✗ No documents found. Add .md or .txt files to the standards directory.")
         return
 
-    # Step 2: Distill safety principles
-    print("\n[2/3] Distilling safety principles...")
-    principles = distill_safety_principles(documents)
+    # Step 2: Iteratively generate and refine the skill
+    print("\n[2/3] Iteratively refining security skill...")
+    skill_content = None
 
-    if not principles:
-        print("✗ Failed to distill principles")
-        return
+    for doc in documents:
+        for chunk_index, chunk_total, chunk_text in iter_chunks(doc["content"], CHUNK_SIZE_CHARS):
+            if skill_content is None:
+                skill_content = generate_initial_skill(chunk_text, doc["source"])
+            else:
+                skill_content = refine_skill(
+                    skill_content,
+                    chunk_text,
+                    doc["source"],
+                    chunk_index,
+                    chunk_total
+                )
 
-    # Step 3: Generate constitutional skill
-    print("\n[3/3] Generating constitutional skill...")
-    skill_content = generate_constitutional_skill(principles)
+            if not skill_content:
+                print("✗ Failed to generate or refine skill")
+                return
 
-    if skill_content:
-        save_constitutional_skill(skill_content, principles, args.output_dir)
+    # Step 3: Save skill
+    print("\n[3/3] Saving security skill...")
+    save_security_skill(skill_content, documents, args.output_dir)
 
-        # Save principles summary
-        summary_file = Path(args.output_dir) / "constitutional_principles.json"
-        with open(summary_file, "w") as f:
-            json.dump(principles, f, indent=2)
-
-        print(f"  ✓ Principles summary: {summary_file}")
-        print("\n" + "="*60)
-        print("✓ Constitutional skill generation complete!")
-        print("="*60)
-        print(f"\nNext steps:")
-        print(f"1. Review: {args.output_dir}/redcode-constitutional-defense/SKILL.md")
-        print(f"2. Test: python evaluation/run_redcode_with_skills.py --skill_type constitutional --ids 4")
-        print("="*60)
-    else:
-        print("\n✗ Failed to generate constitutional skill")
+    print("\n" + "="*60)
+    print("✓ Constitutional skill generation complete!")
+    print("="*60)
+    print(f"\nNext steps:")
+    print(f"1. Review: {args.output_dir}/redcode-constitutional-defense/SKILL.md")
+    print(f"2. Test: python evaluation/run_redcode_with_skills.py --skill_type constitutional --ids 4")
+    print("="*60)
 
 
 if __name__ == "__main__":
