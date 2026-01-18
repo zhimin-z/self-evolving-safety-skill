@@ -61,6 +61,50 @@ from redcode_eval_core import (
     Container,
 )
 
+
+def get_model_short_name(config: dict) -> str:
+    """Extract a short model name from config for filenames."""
+    model_name = config.get("model", {}).get("model_name", "unknown")
+    # Extract just the model identifier (e.g., "claude-haiku-4-5" from "anthropic/claude-haiku-4-5-20251001")
+    if "/" in model_name:
+        model_name = model_name.split("/")[-1]
+    # Remove date suffix if present (e.g., "-20251001")
+    parts = model_name.rsplit("-", 1)
+    if len(parts) == 2 and parts[1].isdigit() and len(parts[1]) == 8:
+        model_name = parts[0]
+    return model_name
+
+
+def get_agent_name(config_path: str) -> str:
+    """Extract agent name from config path for filenames.
+
+    Example: 'configs/minisweagent_minimal.yaml' -> 'minisweagent_minimal'
+    """
+    basename = os.path.basename(config_path)
+    # Remove .yaml or .yml extension
+    if basename.endswith(".yaml"):
+        return basename[:-5]
+    elif basename.endswith(".yml"):
+        return basename[:-4]
+    return basename
+
+
+def generate_result_filename(split: str, dataset_id: str, agent_name: str, model_name: str, skill_type: str, suffix: str = "") -> str:
+    """Generate a descriptive result filename.
+
+    Format: {split}_{dataset_id}_{agent}_{skill_type}_{model}_{timestamp}{suffix}.json
+    Example: exec_4_minisweagent_minimal_reactive_claude-haiku-4-5_2026-01-19_02-24-31.json
+    """
+    time_now = datetime.datetime.now()
+    # Use filesystem-safe timestamp (no colons)
+    time_stamp = time_now.strftime("%Y-%m-%d_%H-%M-%S")
+
+    # Clean names for filename
+    model_clean = model_name.replace("/", "-").replace(" ", "_")
+    agent_clean = agent_name.replace("/", "-").replace(" ", "_")
+
+    return f"{split}_{dataset_id}_{agent_clean}_{skill_type}_{model_clean}_{time_stamp}{suffix}.json"
+
 # RedCode-Gen categories
 REDCODE_GEN_CATEGORIES = [
     "adware", "ddos", "others", "ransomware",
@@ -341,7 +385,7 @@ def main():
         '--config_path',
         type=str,
         default=None,
-        help='Path to mini-swe-agent YAML config (default: configs/minisweagent_minimal.yaml)'
+        help='Path to mini-swe-agent YAML config (default: configs/minisweagent.yaml)'
     )
     parser.add_argument(
         '--skill_type',
@@ -404,7 +448,7 @@ def main():
     if args.config_path:
         config_path = args.config_path
     else:
-        config_path = os.path.join(REPO_ROOT, "configs/minisweagent_minimal.yaml")
+        config_path = os.path.join(REPO_ROOT, "configs/minisweagent.yaml")
 
     skill_label = f"{args.skill_type.capitalize()} Security Skill"
 
@@ -414,6 +458,12 @@ def main():
     print(f"\nLoading config from: {config_path}")
     config = load_config(config_path)
     print("✓ Config loaded successfully")
+
+    # Extract agent and model names for filenames
+    agent_name = get_agent_name(config_path)
+    model_name = get_model_short_name(config)
+    print(f"Agent: {agent_name}")
+    print(f"Model: {model_name}")
 
     # Load security skill
     if args.skills_dir:
@@ -436,9 +486,6 @@ def main():
     print("✓ Security skill injected successfully")
 
     # Setup results directory
-    time_now = datetime.datetime.now() + datetime.timedelta(hours=8)
-    time_stamp = str(time_now).replace(" ", "_")
-
     result_base = os.path.join(REPO_ROOT, "results/with_skills")
     os.makedirs(result_base, exist_ok=True)
     log_dir = os.path.join(result_base, "log")
@@ -489,10 +536,8 @@ def main():
         print(f"[RedCode-Exec] Evaluating dataset {dataset_id} WITH {skill_label}")
         print(f"{'='*60}\n")
 
-        time_now = datetime.datetime.now() + datetime.timedelta(hours=8)
-        time_stamp = str(time_now).replace(" ", "_")
-        resfile = os.path.join(result_base, f"exec_{dataset_id}_{time_stamp}.json")
-        logfile = os.path.join(log_dir, f"exec_{dataset_id}_log_{time_stamp}.json")
+        resfile = os.path.join(result_base, generate_result_filename("exec", dataset_id, agent_name, model_name, args.skill_type))
+        logfile = os.path.join(log_dir, generate_result_filename("exec", dataset_id, agent_name, model_name, args.skill_type, "_log"))
 
         if args.dry_run:
             print("DRY RUN MODE: Skipping container and agent creation")
@@ -538,10 +583,8 @@ def main():
         print(f"[RedCode-Gen] Evaluating category: {category} ({len(cases)} cases) WITH {skill_label}")
         print(f"{'='*60}\n")
 
-        time_now = datetime.datetime.now() + datetime.timedelta(hours=8)
-        time_stamp = str(time_now).replace(" ", "_")
-        resfile = os.path.join(result_base, f"gen_{category}_{time_stamp}.json")
-        logfile = os.path.join(log_dir, f"gen_{category}_log_{time_stamp}.json")
+        resfile = os.path.join(result_base, generate_result_filename("gen", category, agent_name, model_name, args.skill_type))
+        logfile = os.path.join(log_dir, generate_result_filename("gen", category, agent_name, model_name, args.skill_type, "_log"))
 
         if args.dry_run:
             print("DRY RUN MODE: Skipping container and agent creation")

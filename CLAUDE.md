@@ -260,8 +260,7 @@ code-agent-attack/
 │   └── evolved/                 # Phase 2 (todo)
 │
 ├── configs/
-│   ├── minisweagent.yaml       # Main config
-│   └── minisweagent_minimal.yaml  # Minimal prompt version
+│   └── minisweagent.yaml       # Main config
 │
 └── notebooks/                   # Analysis (create if needed)
 ```
