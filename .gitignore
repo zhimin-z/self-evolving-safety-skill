@@ -1,6 +1,7 @@
 .env
 .vscode
 *.venv
+*.txt
 
 # Python
 __pycache__/
