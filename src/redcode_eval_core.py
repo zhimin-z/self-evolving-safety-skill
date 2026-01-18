@@ -145,7 +145,7 @@ def build_agent(
     # Setup model
     model_cfg = config.get("model", {})
     model = LitellmModel(
-        model_name=model_cfg.get("model_name", "deepseek/deepseek-chat"),
+        model_name=model_cfg.get("model_name", "anthropic/claude-haiku-4-5-20251001"),
         model_kwargs=model_cfg.get("model_kwargs", {}),
         cost_tracking=model_cfg.get("cost_tracking", "default"),
     )
