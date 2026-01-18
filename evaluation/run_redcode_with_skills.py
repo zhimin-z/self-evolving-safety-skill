@@ -78,23 +78,19 @@ def load_skill(skills_dir: str, skill_type: str = "reactive") -> str:
 
     Returns the skill content as a string to be injected into agent's system prompt.
     """
-    skill_types = {
-        "reactive": ("redcode-reactive-defense", "src/reactive_skill_generator.py"),
-        "constitutional": ("redcode-constitutional-defense", "src/constitutional_skill_generator.py"),
-        "proactive": ("redcode-proactive-defense", "src/proactive_skill_generator.py")
+    skill_dirs = {
+        "reactive": "redcode-reactive-defense",
+        "constitutional": "redcode-constitutional-defense",
+        "proactive": "redcode-proactive-defense"
     }
 
-    if skill_type not in skill_types:
+    if skill_type not in skill_dirs:
         raise ValueError(f"Invalid skill_type: {skill_type}. Must be 'reactive', 'constitutional', or 'proactive'")
 
-    skill_dir, generator_script = skill_types[skill_type]
-    skill_path = Path(skills_dir) / skill_dir / "SKILL.md"
+    skill_path = Path(skills_dir) / skill_dirs[skill_type] / "SKILL.md"
 
     if not skill_path.exists():
-        raise FileNotFoundError(
-            f"{skill_type.capitalize()} skill not found at: {skill_path}\n"
-            f"Run: python {generator_script}"
-        )
+        raise FileNotFoundError(f"{skill_type.capitalize()} skill not found at: {skill_path}")
 
     with open(skill_path) as f:
         skill_content = f.read()
@@ -113,9 +109,9 @@ def load_skill(skills_dir: str, skill_type: str = "reactive") -> str:
 
 def inject_skill_into_config(config: dict, skill_content: str, skill_type: str = "reactive") -> dict:
     """
-    Inject the security skill into the agent's system template.
+    Inject the security skill at the TOP of the agent's system template.
 
-    This modifies the config to append the skill to the system prompt.
+    The skill is prepended to the system prompt so it takes precedence.
 
     Args:
         config: Agent configuration dictionary
@@ -128,13 +124,11 @@ def inject_skill_into_config(config: dict, skill_content: str, skill_type: str =
     skill_labels = {
         "reactive": "Reactive Malicious Code Defense",
         "constitutional": "Constitutional Malicious Code Defense",
-        "proactive": "Proactive-Based Malicious Code Defense"
+        "proactive": "Proactive Malicious Code Defense"
     }
 
-    # Append the skill to the system template
-    enhanced_template = f"""{current_template}
-
-# ============================================================
+    # Prepend the skill to the system template (skill first, then original template)
+    enhanced_template = f"""# ============================================================
 # SECURITY SKILL: {skill_labels.get(skill_type, "Security Defense")}
 # ============================================================
 
@@ -143,7 +137,8 @@ def inject_skill_into_config(config: dict, skill_content: str, skill_type: str =
 # ============================================================
 # END SECURITY SKILL
 # ============================================================
-"""
+
+{current_template}"""
 
     # Update the config
     config["agent"]["system_template"] = enhanced_template
