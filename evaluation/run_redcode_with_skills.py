@@ -341,7 +341,7 @@ def main():
         '--config_path',
         type=str,
         default=None,
-        help='Path to mini-swe-agent YAML config (default: configs/claude_haiku.yaml)'
+        help='Path to mini-swe-agent YAML config (default: configs/minisweagent_minimal.yaml)'
     )
     parser.add_argument(
         '--skill_type',
@@ -404,8 +404,7 @@ def main():
     if args.config_path:
         config_path = args.config_path
     else:
-        # Default to Claude Haiku config
-        config_path = os.path.join(REPO_ROOT, "configs/claude_haiku.yaml")
+        config_path = os.path.join(REPO_ROOT, "configs/minisweagent_minimal.yaml")
 
     skill_label = f"{args.skill_type.capitalize()} Security Skill"
 
