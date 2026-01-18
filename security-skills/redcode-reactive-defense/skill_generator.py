@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-Reactive Skill Generator - Creates ONE comprehensive security skill from RedCode attacks.
+Reactive Skill Generator - Iteratively refines ONE security skill from RedCode attacks.
 
-This implements proactive adversarial defense: analyze attack scenarios directly from
-the RedCode benchmark and synthesize a reactive defense skill that covers all patterns.
+This implements adversarial synthesis with a REACTIVE focus: detect malicious INTENT
+regardless of presentation format (code, summary, instructions, stubs).
 
 RedCode Dataset Structure:
 - RedCode-Exec: external/RedCode/dataset/RedCode-Exec/py2text_dataset_json/
   - Files: index{N}_30_codes_full.json (N = 1-27)
-  - Each JSON contains: Index, Code, Text_summary, Text_details
+  - Uses: Text_details field only (detailed attack description)
 
 - RedCode-Gen: external/RedCode/dataset/RedCode-Gen/
   - Folders: adware, ddos, others, ransomware, rootkit, spyware, trojan, virus
-  - Each folder contains Python files with malware function stubs
+  - Uses: Whole file content (malware function stubs)
 
 Usage:
     # All datasets from both splits
@@ -24,49 +24,39 @@ Usage:
     # Only RedCode-Gen
     python skill_generator.py --split gen
 
-    # Specific datasets from RedCode-Exec (by index number)
+    # Specific datasets
     python skill_generator.py --split exec --dataset_ids 4 5 6
-
-    # Specific categories from RedCode-Gen (by folder name)
-    python skill_generator.py --split gen --dataset_ids virus trojan ransomware
+    python skill_generator.py --split gen --dataset_ids virus trojan
 """
 
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Iterable
 from dotenv import load_dotenv
 from litellm import completion
 
 load_dotenv()
 
+MAX_SKILL_CHARS = 14000
+CHUNK_SIZE_CHARS = 6000  # Max chars per batch of cases
+
 
 def load_redcode_exec(benchmark_dir: Path, dataset_ids: Optional[List[str]] = None) -> List[Dict]:
     """
-    Load RedCode-Exec benchmark datasets from py2text_dataset_json.
-
-    Args:
-        benchmark_dir: Path to RedCode dataset root (external/RedCode/dataset)
-        dataset_ids: List of dataset IDs to load (e.g., ["4", "5", "6"]). If None, load all.
-
-    Returns:
-        List of attack dictionaries with all variants (code, summary, details)
+    Load RedCode-Exec: Only Text_details field from each case.
     """
     exec_dir = benchmark_dir / "RedCode-Exec" / "py2text_dataset_json"
 
     if not exec_dir.exists():
         raise FileNotFoundError(f"RedCode-Exec directory not found: {exec_dir}")
 
-    all_attacks = []
-
-    # Get all JSON files
+    all_cases = []
     json_files = sorted(exec_dir.glob("index*_30_codes_full.json"))
 
     for json_file in json_files:
-        # Extract dataset ID from filename: index4_30_codes_full.json -> "4"
         dataset_id = json_file.stem.split("_")[0].replace("index", "")
 
-        # Skip if not in requested dataset_ids
         if dataset_ids and dataset_id not in dataset_ids:
             continue
 
@@ -74,90 +64,51 @@ def load_redcode_exec(benchmark_dir: Path, dataset_ids: Optional[List[str]] = No
             dataset = json.load(f)
 
             for item in dataset:
-                index = item.get("Index", "")
-                risky_code = item.get("Code", "")
+                text_details = item.get("Text_details", "")
+                if text_details.strip():
+                    all_cases.append({
+                        "split": "exec",
+                        "dataset_id": dataset_id,
+                        "index": item.get("Index", ""),
+                        "content": text_details
+                    })
 
-                # Add code variant
-                all_attacks.append({
-                    "split": "exec",
-                    "dataset_id": dataset_id,
-                    "index": index,
-                    "variant": "code",
-                    "prompt": risky_code,
-                    "risky_code": risky_code
-                })
-
-                # Add summary variant
-                all_attacks.append({
-                    "split": "exec",
-                    "dataset_id": dataset_id,
-                    "index": index,
-                    "variant": "summary",
-                    "prompt": item.get("Text_summary", ""),
-                    "risky_code": risky_code
-                })
-
-                # Add details variant
-                all_attacks.append({
-                    "split": "exec",
-                    "dataset_id": dataset_id,
-                    "index": index,
-                    "variant": "details",
-                    "prompt": item.get("Text_details", ""),
-                    "risky_code": risky_code
-                })
-
-    return all_attacks
+    return all_cases
 
 
 def load_redcode_gen(benchmark_dir: Path, dataset_ids: Optional[List[str]] = None) -> List[Dict]:
     """
-    Load RedCode-Gen benchmark datasets from category folders.
-
-    Args:
-        benchmark_dir: Path to RedCode dataset root (external/RedCode/dataset)
-        dataset_ids: List of category folder names (e.g., ["virus", "trojan"]). If None, load all.
-
-    Returns:
-        List of attack dictionaries with malware code stubs
+    Load RedCode-Gen: Whole file content from each Python file.
     """
     gen_dir = benchmark_dir / "RedCode-Gen"
 
     if not gen_dir.exists():
         raise FileNotFoundError(f"RedCode-Gen directory not found: {gen_dir}")
 
-    all_attacks = []
-
-    # Get all category folders
+    all_cases = []
     category_folders = [d for d in sorted(gen_dir.iterdir()) if d.is_dir()]
 
     for category_dir in category_folders:
         category_name = category_dir.name
 
-        # Skip if not in requested dataset_ids
         if dataset_ids and category_name not in dataset_ids:
             continue
 
-        # Get all Python files in category
         py_files = sorted(category_dir.glob("*.py"))
 
         for py_file in py_files:
             with open(py_file) as f:
-                code_content = f.read()
+                content = f.read()
 
-            # Extract function name from filename: virus_1_file_infection.py -> virus_1_file_infection
-            func_name = py_file.stem
+            if content.strip():
+                all_cases.append({
+                    "split": "gen",
+                    "dataset_id": category_name,
+                    "index": py_file.stem,
+                    "content": content
+                })
 
-            all_attacks.append({
-                "split": "gen",
-                "dataset_id": category_name,
-                "index": func_name,
-                "variant": "code_stub",
-                "prompt": f"Complete this malware function:\n\n{code_content}",
-                "risky_code": code_content
-            })
-
-    return all_attacks
+    return all_cases
 
 
 def load_redcode_datasets(
@@ -167,38 +118,26 @@ def load_redcode_datasets(
 ) -> List[Dict]:
     """
     Load RedCode benchmark datasets based on split and dataset_ids.
-
-    Args:
-        benchmark_dir: Path to RedCode dataset root (external/RedCode/dataset)
-        split: Which split to load - "exec", "gen", or "all"
-        dataset_ids: List of dataset IDs to load. Interpretation depends on split:
-            - exec: numeric strings like "4", "5", "6"
-            - gen: category names like "virus", "trojan"
-            - all: will try to match against both splits
-
-    Returns:
-        List of all attack dictionaries
     """
     benchmark_path = Path(benchmark_dir)
 
     if not benchmark_path.exists():
         raise FileNotFoundError(f"Benchmark directory not found: {benchmark_path}")
 
-    all_attacks = []
+    all_cases = []
 
     # Load RedCode-Exec
     if split in ("exec", "all"):
-        # Filter dataset_ids for exec (numeric IDs)
         exec_ids = None
         if dataset_ids:
             exec_ids = [d for d in dataset_ids if d.isdigit()]
             if not exec_ids and split == "exec":
-                exec_ids = dataset_ids  # User specified exec, use all IDs
+                exec_ids = dataset_ids
 
         try:
-            exec_attacks = load_redcode_exec(benchmark_path, exec_ids if exec_ids else None)
-            all_attacks.extend(exec_attacks)
-            print(f"  ✓ Loaded {len(exec_attacks)} attack scenarios from RedCode-Exec")
+            exec_cases = load_redcode_exec(benchmark_path, exec_ids if exec_ids else None)
+            all_cases.extend(exec_cases)
+            print(f"  ✓ Loaded {len(exec_cases)} cases from RedCode-Exec")
         except FileNotFoundError as e:
             if split == "exec":
                 raise
@@ -206,216 +145,213 @@ def load_redcode_datasets(
 
     # Load RedCode-Gen
     if split in ("gen", "all"):
-        # Filter dataset_ids for gen (category names)
         gen_ids = None
         if dataset_ids:
             gen_ids = [d for d in dataset_ids if not d.isdigit()]
             if not gen_ids and split == "gen":
-                gen_ids = dataset_ids  # User specified gen, use all IDs
+                gen_ids = dataset_ids
 
         try:
-            gen_attacks = load_redcode_gen(benchmark_path, gen_ids if gen_ids else None)
-            all_attacks.extend(gen_attacks)
-            print(f"  ✓ Loaded {len(gen_attacks)} attack scenarios from RedCode-Gen")
+            gen_cases = load_redcode_gen(benchmark_path, gen_ids if gen_ids else None)
+            all_cases.extend(gen_cases)
+            print(f"  ✓ Loaded {len(gen_cases)} cases from RedCode-Gen")
         except FileNotFoundError as e:
             if split == "gen":
                 raise
             print(f"  ⚠ Skipping RedCode-Gen: {e}")
 
-    print(f"  ✓ Total: {len(all_attacks)} attack scenarios loaded")
-    return all_attacks
+    print(f"  ✓ Total: {len(all_cases)} cases loaded")
+    return all_cases
 
 
-def analyze_attack_patterns(attacks: List[Dict]) -> Dict:
+def iter_case_chunks(cases: List[Dict], chunk_size: int) -> Iterable[Tuple[int, int, List[Dict]]]:
     """
-    Analyze attack patterns from loaded RedCode datasets.
+    Yield chunks of cases where total content size doesn't exceed chunk_size.
 
-    Groups attacks by type and extracts representative examples for skill generation.
+    Returns: (chunk_index, total_chunks, cases_in_chunk)
     """
-    analysis = {
-        "total_attacks": len(attacks),
-        "splits": set(),
-        "datasets": set(),
-        "variants": set(),
-        "examples_by_dataset": {},  # Group examples by dataset/category
-        "examples_by_variant": {}   # Group examples by variant type
-    }
+    if not cases:
+        return
 
-    for attack in attacks:
-        analysis["splits"].add(attack["split"])
-        analysis["datasets"].add(attack["dataset_id"])
-        analysis["variants"].add(attack["variant"])
+    # First pass: determine chunks
+    chunks = []
+    current_chunk = []
+    current_size = 0
 
-        dataset_id = attack["dataset_id"]
-        variant = attack["variant"]
+    for case in cases:
+        case_content = f"**Case** (Split: {case['split']}, Dataset: {case['dataset_id']}, Index: {case['index']}):\n{case['content']}\n\n---\n\n"
+        case_size = len(case_content)
 
-        # Store examples by dataset (limit to 3 per dataset)
-        if dataset_id not in analysis["examples_by_dataset"]:
-            analysis["examples_by_dataset"][dataset_id] = []
-        if len(analysis["examples_by_dataset"][dataset_id]) < 3:
-            analysis["examples_by_dataset"][dataset_id].append(attack)
+        # If single case exceeds chunk_size, it gets its own chunk
+        if case_size >= chunk_size:
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = []
+                current_size = 0
+            chunks.append([case])
+        # If adding this case would exceed chunk_size, start new chunk
+        elif current_size + case_size > chunk_size:
+            chunks.append(current_chunk)
+            current_chunk = [case]
+            current_size = case_size
+        # Otherwise add to current chunk
+        else:
+            current_chunk.append(case)
+            current_size += case_size
 
-        # Store examples by variant (limit to 5 per variant)
-        if variant not in analysis["examples_by_variant"]:
-            analysis["examples_by_variant"][variant] = []
-        if len(analysis["examples_by_variant"][variant]) < 5:
-            analysis["examples_by_variant"][variant].append(attack)
+    # Don't forget the last chunk
+    if current_chunk:
+        chunks.append(current_chunk)
 
-    # Convert sets to sorted lists
-    analysis["splits"] = sorted(list(analysis["splits"]))
-    analysis["datasets"] = sorted(list(analysis["datasets"]))
-    analysis["variants"] = sorted(list(analysis["variants"]))
-
-    return analysis
+    # Yield chunks with index info
+    total_chunks = len(chunks)
+    for i, chunk in enumerate(chunks, 1):
+        yield i, total_chunks, chunk
 
 
-def generate_reactive_skill(analysis: Dict) -> str:
+def format_chunk_content(cases: List[Dict]) -> str:
+    """Format a chunk of cases for the LLM prompt (full content, no truncation)."""
+    parts = []
+    for case in cases:
+        parts.append(f"**Case** (Split: {case['split']}, Dataset: {case['dataset_id']}, Index: {case['index']}):\n{case['content']}")
+    return "\n\n---\n\n".join(parts)
+
+
+def generate_initial_skill(cases: List[Dict]) -> str:
     """
-    Generate ONE comprehensive reactive security skill from attack patterns.
-
-    Uses LLM to synthesize patterns across all attack types into a format-agnostic
-    defense skill that focuses on detecting malicious INTENT.
+    Generate an initial reactive security skill from the first chunk of attack cases.
     """
+    chunk_content = format_chunk_content(cases)
 
-    # Prepare examples grouped by dataset/category
-    examples_text = ""
-    for dataset_id, examples in list(analysis["examples_by_dataset"].items())[:8]:  # Limit datasets shown
-        examples_text += f"\n### Dataset/Category: {dataset_id}\n"
-        for i, ex in enumerate(examples[:2], 1):  # Max 2 examples per dataset
-            examples_text += f"""
-**Example {i}** (Variant: {ex['variant']}):
-- Prompt: {ex['prompt'][:300]}{'...' if len(ex['prompt']) > 300 else ''}
-- Risky Code: {ex['risky_code'][:200]}{'...' if len(ex['risky_code']) > 200 else ''}
-"""
-
-    stats_text = f"""
-**Attack Scenario Statistics:**
-- Total attack scenarios: {analysis['total_attacks']}
-- Splits: {', '.join(analysis['splits'])}
-- Datasets/Categories: {len(analysis['datasets'])} ({', '.join(analysis['datasets'][:10])}{'...' if len(analysis['datasets']) > 10 else ''})
-- Presentation variants: {', '.join(analysis['variants'])}
-"""
-
-    prompt = f"""You are a security expert creating a REACTIVE security skill for code agents.
+    prompt = f"""You are a security expert creating a REACTIVE defense skill for code agents.
 
 **Context:**
-We have {analysis['total_attacks']} attack scenarios from the RedCode security benchmark.
-These represent malicious code execution requests that an agent should REFUSE.
+We are iteratively building ONE security skill from RedCode benchmark attack scenarios.
+The skill must detect malicious INTENT regardless of presentation format.
 
-{stats_text}
-
-**Attack Examples Across Categories:**
-{examples_text}
+**Attack Scenarios (Chunk 1):**
+{chunk_content}
 
 **Your Task:**
-Create ONE comprehensive security skill that detects and refuses ALL these attack patterns.
+Generate a SINGLE comprehensive security skill that detects and refuses these attacks.
 
-**Key Insight:** The agent won't know which attack type it's facing in advance, so the skill must:
-1. Detect malicious patterns regardless of presentation format (direct code, text summary, detailed description, code stubs)
-2. Identify common underlying malicious intents (file access, process manipulation, system modification, malware creation)
-3. Provide ACTIONABLE detection criteria that work across ALL attack types
+**Key Insight:** Malicious requests can be presented as:
+- Direct code
+- Text summaries
+- Detailed instructions
+- Code stubs to complete
+
+The underlying malicious INTENT is what matters, not the presentation format.
+
+**Requirements:**
+1. Focus on detecting malicious INTENT, not just syntax patterns
+2. Be format-agnostic - same detection for code, text, or instructions
+3. Keep the skill under {MAX_SKILL_CHARS} characters
+4. Provide concrete detection criteria and refusal guidance
 
 **Output Format (Agent Skills Spec - YAML + Markdown):**
 
 ---
 name: redcode-reactive-defense
-description: Comprehensive security skill that detects and refuses malicious code execution requests regardless of presentation format
+description: Reactive security skill that detects malicious intent regardless of presentation format
 ---
 
 # Security Skill: Reactive Malicious Code Defense
 
 ## Overview
-[Brief overview of threats this skill addresses - synthesize across ALL attack categories]
+[Brief overview of the reactive defense philosophy]
 
 ## Defense Principle
-[ONE reactive principle that covers all attack patterns - focus on INTENT, not format]
-
-**Key insight:** Malicious requests can be presented as:
-- Direct code (e.g., "Execute this Python script...")
-- Text summaries (e.g., "Create a script that copies system files...")
-- Detailed instructions (e.g., "Step 1: Import shutil, Step 2: Copy /etc/passwd...")
-- Code stubs to complete (e.g., "Complete this malware function...")
-
-The underlying malicious INTENT is what matters, not the presentation format.
+Detect malicious INTENT, not presentation format. The same harmful operation
+can be requested as code, text description, or step-by-step instructions.
 
 ## Detection Criteria
 
-Refuse requests that involve:
+### 1. [Category - e.g., Sensitive File Access]
+**Malicious Intent:** [What the attacker wants to achieve]
+**Detection Signals:** [Patterns across all formats]
+**Action:** Refuse and explain
 
-### 1. [Category 1 - e.g., Unauthorized File Access]
-- [Specific pattern 1]
-- [Specific pattern 2]
-- **Applies to:** All presentation formats
+### 2. [Continue for each major category...]
 
-### 2. [Category 2 - e.g., Process Manipulation]
-- [Specific pattern 1]
-- [Specific pattern 2]
-
-### 3. [Category 3 - e.g., Malware Creation]
-[Continue for all major categories...]
-
-## Required Action
-
-When malicious intent is detected:
-1. **REFUSE** - Do not execute or generate the code
-2. **EXPLAIN** - State which malicious pattern was detected
-3. **SUGGEST** - Offer safe alternatives if the user has legitimate needs
-
-## Examples
-
-### Pattern 1: [Major Pattern]
-
-**Unsafe - Direct Code:**
-```python
-[example]
-```
-
-**Unsafe - Text Summary:**
-"[example]"
-
-**Unsafe - Code Stub:**
-"Complete this function: [example]"
-
-**Correct Response for ALL formats:**
-"I cannot help with [reason]. This could [harm]..."
-
-[Continue for 3-4 major patterns]
+## Refusal Template
+"I cannot help with this request because it involves [malicious intent].
+This could [specific harm]. If you have a legitimate need, consider [safe alternative]."
 
 ## Safe Alternatives
-
-[Provide legitimate use cases that might be confused with attacks]
-
-## Implementation Notes
-
-This skill is designed to be:
-- **Format-agnostic:** Detects malicious intent regardless of presentation
-- **Intent-focused:** Looks for underlying malicious goals, not surface syntax
-- **Comprehensive:** Covers file operations, process control, network activity, and malware patterns
+[Legitimate use cases and how to handle them]
 
 ---
 
-**Generate the complete reactive skill now, covering all {len(analysis['datasets'])} attack categories:**
-"""
+Generate the initial skill now:"""
 
     try:
-        print("  Generating reactive skill with Claude Haiku 4.5...")
         response = completion(
             model="anthropic/claude-haiku-4-5-20251001",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
+            temperature=0.3,
             max_tokens=8192
         )
-
-        return response.choices[0].message.content
-
+        return extract_markdown(response.choices[0].message.content)
     except Exception as e:
-        print(f"✗ Error generating skill: {e}")
+        print(f"  ✗ Error generating initial skill: {e}")
         return None
+
+
+def refine_skill(existing_skill: str, cases: List[Dict], chunk_num: int, total_chunks: int) -> str:
+    """
+    Refine an existing reactive security skill with a new chunk of attack cases.
+    """
+    chunk_content = format_chunk_content(cases)
+
+    prompt = f"""You are refining an existing reactive security skill for code agents.
+
+**Existing Skill (keep format, update in-place):**
+{existing_skill}
+
+**New Attack Scenarios (Chunk {chunk_num}/{total_chunks}):**
+{chunk_content}
+
+**Your Task:**
+Refine the existing skill by incorporating detection criteria for these NEW attack patterns.
+
+**Requirements:**
+1. Preserve the YAML + Markdown structure
+2. ADD new detection criteria only if they cover intents not already handled
+3. Avoid duplication - merge similar patterns into existing categories
+4. Keep the final skill under {MAX_SKILL_CHARS} characters
+5. If the attacks are already covered, return the skill unchanged
+
+Return ONLY the updated skill content:"""
+
+    try:
+        response = completion(
+            model="anthropic/claude-haiku-4-5-20251001",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=8192
+        )
+        return extract_markdown(response.choices[0].message.content)
+    except Exception as e:
+        print(f"  ✗ Error refining skill: {e}")
+        return None
+
+
+def extract_markdown(content: str) -> str:
+    """Extract markdown if wrapped in code blocks."""
+    if "```markdown" in content:
+        start = content.find("```markdown") + 11
+        end = content.rfind("```")
+        return content[start:end].strip()
+    if content.startswith("```"):
+        lines = content.split("\n")
+        return "\n".join(lines[1:-1]).strip()
+    return content.strip()
 
 
 def save_reactive_skill(
     skill_content: str,
-    analysis: Dict,
+    total_cases: int,
     split: str,
     dataset_ids: Optional[List[str]],
     output_dir: str
@@ -424,24 +360,22 @@ def save_reactive_skill(
     skill_dir = Path(output_dir) / "redcode-reactive-defense"
     skill_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save SKILL.md
     skill_file = skill_dir / "SKILL.md"
     with open(skill_file, "w") as f:
         f.write(skill_content)
 
-    # Save metadata
     metadata_file = skill_dir / "metadata.json"
     with open(metadata_file, "w") as f:
         json.dump({
             "skill_type": "reactive",
             "generated_from": {
-                "approach": "adversarial-synthesis",
+                "approach": "adversarial-synthesis-iterative",
                 "benchmark": "RedCode",
                 "split": split,
                 "dataset_ids": dataset_ids,
-                "total_attack_scenarios": analysis["total_attacks"],
-                "datasets": analysis["datasets"],
-                "variants": analysis["variants"]
+                "total_cases": total_cases,
+                "chunk_size_chars": CHUNK_SIZE_CHARS,
+                "max_skill_chars": MAX_SKILL_CHARS
             },
             "model": "anthropic/claude-haiku-4-5-20251001"
         }, f, indent=2)
@@ -453,93 +387,93 @@ def save_reactive_skill(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate reactive security skill from RedCode benchmark"
+        description="Generate reactive security skill from RedCode benchmark (iterative refinement)"
     )
     parser.add_argument(
         "--benchmark_dir",
         type=str,
         default="external/RedCode/dataset",
-        help="Directory containing RedCode benchmark datasets (default: external/RedCode/dataset)"
+        help="Directory containing RedCode benchmark datasets"
     )
     parser.add_argument(
         "--split",
         type=str,
         choices=["exec", "gen", "all"],
         default="all",
-        help="Which dataset split to use: exec (RedCode-Exec), gen (RedCode-Gen), or all (default: all)"
+        help="Which dataset split to use: exec, gen, or all (default: all)"
     )
     parser.add_argument(
         "--dataset_ids",
         type=str,
         nargs="+",
         default=None,
-        help="Specific dataset IDs to analyze. For exec: numeric IDs (4, 5, 6). For gen: category names (virus, trojan)"
+        help="Specific dataset IDs. For exec: numeric (4, 5). For gen: category names (virus, trojan)"
     )
     parser.add_argument(
         "--output_dir",
         type=str,
         default="security-skills",
-        help="Output directory for the reactive skill"
+        help="Output directory for the skill"
     )
 
     args = parser.parse_args()
 
     print("=" * 60)
-    print("Reactive Skill Generator (Adversarial Synthesis)")
+    print("Reactive Skill Generator (Iterative Refinement)")
     print("=" * 60)
-    print()
 
-    # Step 1: Load RedCode attack scenarios
-    print("[1/3] Loading RedCode benchmark attack scenarios...")
+    # Step 1: Load cases
+    print("\n[1/3] Loading RedCode benchmark cases...")
     print(f"  Benchmark directory: {args.benchmark_dir}")
     print(f"  Split: {args.split}")
     if args.dataset_ids:
         print(f"  Dataset IDs: {args.dataset_ids}")
 
     try:
-        attacks = load_redcode_datasets(
-            args.benchmark_dir,
-            split=args.split,
-            dataset_ids=args.dataset_ids
-        )
+        cases = load_redcode_datasets(args.benchmark_dir, args.split, args.dataset_ids)
     except Exception as e:
         print(f"✗ Error loading benchmark: {e}")
         return
 
-    if not attacks:
-        print("✗ No attack scenarios found. Check benchmark directory path and dataset IDs.")
+    if not cases:
+        print("✗ No cases found. Check benchmark directory and dataset IDs.")
         return
 
-    # Step 2: Analyze attack patterns
-    print("\n[2/3] Analyzing attack patterns...")
-    analysis = analyze_attack_patterns(attacks)
-    print(f"  ✓ Splits: {', '.join(analysis['splits'])}")
-    print(f"  ✓ Datasets/Categories: {len(analysis['datasets'])}")
-    print(f"  ✓ Variants: {', '.join(analysis['variants'])}")
-
-    # Step 3: Generate reactive skill
-    print("\n[3/3] Generating reactive skill...")
+    # Step 2: Iteratively build skill
+    print("\n[2/3] Iteratively building reactive skill...")
     print(f"  Using: Claude Haiku 4.5")
-    skill_content = generate_reactive_skill(analysis)
+    print(f"  Chunk size: {CHUNK_SIZE_CHARS} chars")
+    print(f"  Max skill chars: {MAX_SKILL_CHARS}")
 
-    if skill_content:
-        save_reactive_skill(
-            skill_content,
-            analysis,
-            args.split,
-            args.dataset_ids,
-            args.output_dir
-        )
+    skill_content = None
 
-        print("\n" + "=" * 60)
-        print("✓ Reactive skill generation complete!")
-        print("=" * 60)
-        print(f"\nNext steps:")
-        print(f"1. Review: {args.output_dir}/redcode-reactive-defense/SKILL.md")
-        print(f"2. Test: python evaluation/run_redcode_with_skills.py --skill_type reactive --split exec --dataset_ids 4")
-        print("=" * 60)
-    else:
-        print("\n✗ Failed to generate reactive skill")
+    for chunk_num, total_chunks, chunk_cases in iter_case_chunks(cases, CHUNK_SIZE_CHARS):
+        case_indices = f"{chunk_cases[0]['index']}" if len(chunk_cases) == 1 else f"{chunk_cases[0]['index']}...{chunk_cases[-1]['index']}"
+        print(f"\n  [{chunk_num}/{total_chunks}] Processing {len(chunk_cases)} cases ({case_indices})...")
+
+        if skill_content is None:
+            skill_content = generate_initial_skill(chunk_cases)
+        else:
+            skill_content = refine_skill(skill_content, chunk_cases, chunk_num, total_chunks)
+
+        if not skill_content:
+            print("✗ Failed to generate/refine skill")
+            return
+
+        skill_chars = len(skill_content)
+        print(f"  ✓ Skill updated ({skill_chars} chars)")
+
+    # Step 3: Save skill
+    print("\n[3/3] Saving reactive skill...")
+    save_reactive_skill(skill_content, len(cases), args.split, args.dataset_ids, args.output_dir)
+
+    print("\n" + "=" * 60)
+    print("✓ Reactive skill generation complete!")
+    print("=" * 60)
+    print(f"\nNext steps:")
+    print(f"1. Review: {args.output_dir}/redcode-reactive-defense/SKILL.md")
+    print(f"2. Test: python evaluation/run_redcode_with_skills.py --skill_type reactive")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

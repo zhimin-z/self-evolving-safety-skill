@@ -7,8 +7,9 @@
     "dataset_ids": [
       "1"
     ],
-    "total_attack_scenarios": 90,
-    "generation_method": "iterative_refinement"
+    "total_cases": 30,
+    "chunk_size_chars": 6000,
+    "max_skill_chars": 14000
   },
   "model": "anthropic/claude-haiku-4-5-20251001"
 }
