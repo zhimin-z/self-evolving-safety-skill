@@ -5,15 +5,36 @@ Proactive Skill Generator - Iteratively builds security skill by examining each 
 This implements Method C: Adversarial Synthesis (Bench-to-Skill) with iterative refinement.
 For each attack in RedCode, ask "What technical check would stop this?" and refine the skill.
 
+RedCode Dataset Structure:
+- RedCode-Exec: external/RedCode/dataset/RedCode-Exec/py2text_dataset_json/
+  - Files: index{N}_30_codes_full.json (N = 1-27)
+  - Each JSON contains: Index, Code, Text_summary, Text_details
+
+- RedCode-Gen: external/RedCode/dataset/RedCode-Gen/
+  - Folders: adware, ddos, others, ransomware, rootkit, spyware, trojan, virus
+  - Each folder contains Python files with malware function stubs
+
 Usage:
-    python src/proactive_skill_generator.py --dataset_ids 4 5 6 7
+    # All datasets from both splits
+    python skill_generator.py
+
+    # Only RedCode-Exec
+    python skill_generator.py --split exec
+
+    # Only RedCode-Gen
+    python skill_generator.py --split gen
+
+    # Specific datasets from RedCode-Exec (by index number)
+    python skill_generator.py --split exec --dataset_ids 4 5 6
+
+    # Specific categories from RedCode-Gen (by folder name)
+    python skill_generator.py --split gen --dataset_ids virus trojan ransomware
 """
 
 import argparse
 import json
-import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 from dotenv import load_dotenv
 from litellm import completion
 
@@ -64,23 +85,30 @@ Safe alternative: [If applicable, suggest safer approach]
 """
 
 
-def load_redcode_datasets(benchmark_dir: str, dataset_ids: List[int] = None) -> List[Dict]:
+def load_redcode_exec(benchmark_dir: Path, dataset_ids: Optional[List[str]] = None) -> List[Dict]:
     """
-    Load RedCode benchmark datasets as a flat list of attacks.
+    Load RedCode-Exec benchmark datasets from py2text_dataset_json.
 
-    Returns: List of attack dictionaries with all variants (code, summary, details)
+    Args:
+        benchmark_dir: Path to RedCode dataset root (external/RedCode/dataset)
+        dataset_ids: List of dataset IDs to load (e.g., ["4", "5", "6"]). If None, load all.
+
+    Returns:
+        List of attack dictionaries with all variants (code, summary, details)
     """
-    benchmark_path = Path(benchmark_dir)
-    dataset_json_dir = benchmark_path / "py2text_dataset_json"
+    exec_dir = benchmark_dir / "RedCode-Exec" / "py2text_dataset_json"
 
-    if not dataset_json_dir.exists():
-        raise FileNotFoundError(f"Dataset directory not found: {dataset_json_dir}")
+    if not exec_dir.exists():
+        raise FileNotFoundError(f"RedCode-Exec directory not found: {exec_dir}")
 
     all_attacks = []
 
-    # Load each dataset JSON file
-    for json_file in sorted(dataset_json_dir.glob("index*_30_codes_full.json")):
-        dataset_id = int(json_file.stem.split("_")[0].replace("index", ""))
+    # Get all JSON files
+    json_files = sorted(exec_dir.glob("index*_30_codes_full.json"))
+
+    for json_file in json_files:
+        # Extract dataset ID from filename: index4_30_codes_full.json -> "4"
+        dataset_id = json_file.stem.split("_")[0].replace("index", "")
 
         # Skip if not in requested dataset_ids
         if dataset_ids and dataset_id not in dataset_ids:
@@ -88,26 +116,34 @@ def load_redcode_datasets(benchmark_dir: str, dataset_ids: List[int] = None) -> 
 
         with open(json_file) as f:
             dataset = json.load(f)
+
             for item in dataset:
-                index = item.get("Index")
+                index = item.get("Index", "")
                 risky_code = item.get("Code", "")
 
-                # Add all three variants
+                # Add code variant
                 all_attacks.append({
+                    "split": "exec",
                     "dataset_id": dataset_id,
                     "index": index,
                     "variant": "code",
                     "prompt": risky_code,
                     "risky_code": risky_code
                 })
+
+                # Add summary variant
                 all_attacks.append({
+                    "split": "exec",
                     "dataset_id": dataset_id,
                     "index": index,
                     "variant": "summary",
                     "prompt": item.get("Text_summary", ""),
                     "risky_code": risky_code
                 })
+
+                # Add details variant
                 all_attacks.append({
+                    "split": "exec",
                     "dataset_id": dataset_id,
                     "index": index,
                     "variant": "details",
@@ -115,7 +151,122 @@ def load_redcode_datasets(benchmark_dir: str, dataset_ids: List[int] = None) -> 
                     "risky_code": risky_code
                 })
 
-    print(f"  ✓ Loaded {len(all_attacks)} attack scenarios from RedCode benchmark")
+    return all_attacks
+
+
+def load_redcode_gen(benchmark_dir: Path, dataset_ids: Optional[List[str]] = None) -> List[Dict]:
+    """
+    Load RedCode-Gen benchmark datasets from category folders.
+
+    Args:
+        benchmark_dir: Path to RedCode dataset root (external/RedCode/dataset)
+        dataset_ids: List of category folder names (e.g., ["virus", "trojan"]). If None, load all.
+
+    Returns:
+        List of attack dictionaries with malware code stubs
+    """
+    gen_dir = benchmark_dir / "RedCode-Gen"
+
+    if not gen_dir.exists():
+        raise FileNotFoundError(f"RedCode-Gen directory not found: {gen_dir}")
+
+    all_attacks = []
+
+    # Get all category folders
+    category_folders = [d for d in sorted(gen_dir.iterdir()) if d.is_dir()]
+
+    for category_dir in category_folders:
+        category_name = category_dir.name
+
+        # Skip if not in requested dataset_ids
+        if dataset_ids and category_name not in dataset_ids:
+            continue
+
+        # Get all Python files in category
+        py_files = sorted(category_dir.glob("*.py"))
+
+        for py_file in py_files:
+            with open(py_file) as f:
+                code_content = f.read()
+
+            # Extract function name from filename: virus_1_file_infection.py -> virus_1_file_infection
+            func_name = py_file.stem
+
+            all_attacks.append({
+                "split": "gen",
+                "dataset_id": category_name,
+                "index": func_name,
+                "variant": "code_stub",
+                "prompt": f"Complete this malware function:\n\n{code_content}",
+                "risky_code": code_content
+            })
+
+    return all_attacks
+
+
+def load_redcode_datasets(
+    benchmark_dir: str,
+    split: str = "all",
+    dataset_ids: Optional[List[str]] = None
+) -> List[Dict]:
+    """
+    Load RedCode benchmark datasets based on split and dataset_ids.
+
+    Args:
+        benchmark_dir: Path to RedCode dataset root (external/RedCode/dataset)
+        split: Which split to load - "exec", "gen", or "all"
+        dataset_ids: List of dataset IDs to load. Interpretation depends on split:
+            - exec: numeric strings like "4", "5", "6"
+            - gen: category names like "virus", "trojan"
+            - all: will try to match against both splits
+
+    Returns:
+        List of all attack dictionaries
+    """
+    benchmark_path = Path(benchmark_dir)
+
+    if not benchmark_path.exists():
+        raise FileNotFoundError(f"Benchmark directory not found: {benchmark_path}")
+
+    all_attacks = []
+
+    # Load RedCode-Exec
+    if split in ("exec", "all"):
+        # Filter dataset_ids for exec (numeric IDs)
+        exec_ids = None
+        if dataset_ids:
+            exec_ids = [d for d in dataset_ids if d.isdigit()]
+            if not exec_ids and split == "exec":
+                exec_ids = dataset_ids  # User specified exec, use all IDs
+
+        try:
+            exec_attacks = load_redcode_exec(benchmark_path, exec_ids if exec_ids else None)
+            all_attacks.extend(exec_attacks)
+            print(f"  ✓ Loaded {len(exec_attacks)} attack scenarios from RedCode-Exec")
+        except FileNotFoundError as e:
+            if split == "exec":
+                raise
+            print(f"  ⚠ Skipping RedCode-Exec: {e}")
+
+    # Load RedCode-Gen
+    if split in ("gen", "all"):
+        # Filter dataset_ids for gen (category names)
+        gen_ids = None
+        if dataset_ids:
+            gen_ids = [d for d in dataset_ids if not d.isdigit()]
+            if not gen_ids and split == "gen":
+                gen_ids = dataset_ids  # User specified gen, use all IDs
+
+        try:
+            gen_attacks = load_redcode_gen(benchmark_path, gen_ids if gen_ids else None)
+            all_attacks.extend(gen_attacks)
+            print(f"  ✓ Loaded {len(gen_attacks)} attack scenarios from RedCode-Gen")
+        except FileNotFoundError as e:
+            if split == "gen":
+                raise
+            print(f"  ⚠ Skipping RedCode-Gen: {e}")
+
+    print(f"  ✓ Total: {len(all_attacks)} attack scenarios loaded")
     return all_attacks
 
 
@@ -127,7 +278,7 @@ def refine_skill_with_batch(current_skill: str, attack_batch: List[Dict], batch_
     """
     # Format attacks for the prompt
     attacks_text = "\n\n".join([
-        f"**Attack {i+1}** (Dataset {attack['dataset_id']}, {attack['variant']})\n"
+        f"**Attack {i+1}** (Split: {attack['split']}, Dataset: {attack['dataset_id']}, Variant: {attack['variant']})\n"
         f"Prompt: {attack['prompt'][:400]}...\n"
         f"Risky Code: {attack.get('risky_code', 'N/A')[:200]}..."
         for i, attack in enumerate(attack_batch[:10])  # Show first 10 in prompt
@@ -241,7 +392,13 @@ def iteratively_build_skill(attacks: List[Dict], batch_size: int = 30) -> str:
     return current_skill
 
 
-def save_proactive_skill(skill_content: str, total_attacks: int, dataset_ids: List[int], output_dir: str):
+def save_proactive_skill(
+    skill_content: str,
+    total_attacks: int,
+    split: str,
+    dataset_ids: Optional[List[str]],
+    output_dir: str
+):
     """Save the proactive skill to Agent Skills directory."""
     skill_dir = Path(output_dir) / "redcode-proactive-defense"
     skill_dir.mkdir(parents=True, exist_ok=True)
@@ -259,8 +416,9 @@ def save_proactive_skill(skill_content: str, total_attacks: int, dataset_ids: Li
             "generated_from": {
                 "approach": "adversarial-synthesis-iterative",
                 "benchmark": "RedCode",
+                "split": split,
+                "dataset_ids": dataset_ids,
                 "total_attack_scenarios": total_attacks,
-                "datasets": dataset_ids,
                 "generation_method": "iterative_refinement"
             },
             "model": "anthropic/claude-haiku-4-5-20251001"
@@ -278,15 +436,22 @@ def main():
     parser.add_argument(
         "--benchmark_dir",
         type=str,
-        default="external/RedCode/dataset/RedCode-Exec",
-        help="Directory containing RedCode benchmark datasets"
+        default="external/RedCode/dataset",
+        help="Directory containing RedCode benchmark datasets (default: external/RedCode/dataset)"
+    )
+    parser.add_argument(
+        "--split",
+        type=str,
+        choices=["exec", "gen", "all"],
+        default="all",
+        help="Which dataset split to use: exec (RedCode-Exec), gen (RedCode-Gen), or all (default: all)"
     )
     parser.add_argument(
         "--dataset_ids",
-        type=int,
+        type=str,
         nargs="+",
         default=None,
-        help="Specific dataset IDs to analyze (default: all datasets)"
+        help="Specific dataset IDs to analyze. For exec: numeric IDs (4, 5, 6). For gen: category names (virus, trojan)"
     )
     parser.add_argument(
         "--batch_size",
@@ -303,24 +468,29 @@ def main():
 
     args = parser.parse_args()
 
-    print("="*60)
+    print("=" * 60)
     print("Proactive Skill Generator (Iterative Refinement)")
-    print("="*60)
+    print("=" * 60)
 
     # Step 1: Load RedCode attack scenarios
     print("\n[1/2] Loading RedCode benchmark attack scenarios...")
     print(f"  Benchmark directory: {args.benchmark_dir}")
+    print(f"  Split: {args.split}")
     if args.dataset_ids:
         print(f"  Dataset IDs: {args.dataset_ids}")
 
     try:
-        attacks = load_redcode_datasets(args.benchmark_dir, args.dataset_ids)
+        attacks = load_redcode_datasets(
+            args.benchmark_dir,
+            split=args.split,
+            dataset_ids=args.dataset_ids
+        )
     except Exception as e:
         print(f"✗ Error loading benchmark: {e}")
         return
 
     if not attacks:
-        print("✗ No attack scenarios found. Check benchmark directory path.")
+        print("✗ No attack scenarios found. Check benchmark directory path and dataset IDs.")
         return
 
     # Step 2: Iteratively build skill
@@ -333,17 +503,18 @@ def main():
         save_proactive_skill(
             skill_content,
             len(attacks),
-            args.dataset_ids or list(range(1, 28)),
+            args.split,
+            args.dataset_ids,
             args.output_dir
         )
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("✓ Proactive skill generation complete!")
-        print("="*60)
+        print("=" * 60)
         print(f"\nNext steps:")
         print(f"1. Review: {args.output_dir}/redcode-proactive-defense/SKILL.md")
-        print(f"2. Test: python evaluation/run_redcode_with_skills.py --skill_type proactive --ids 4")
-        print("="*60)
+        print(f"2. Test: python evaluation/run_redcode_with_skills.py --skill_type proactive --split exec --dataset_ids 4")
+        print("=" * 60)
     else:
         print("\n✗ Failed to generate proactive skill")
 
