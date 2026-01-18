@@ -280,7 +280,7 @@ def main():
         '--config_path',
         type=str,
         default=None,
-        help='Path to mini-swe-agent YAML config (default: configs/minisweagent.yaml)'
+        help='Path to mini-swe-agent YAML config (default: configs/minisweagent_minimal.yaml)'
     )
     parser.add_argument(
         '--split',
@@ -336,11 +336,8 @@ def main():
     # Load configuration based on LLM provider choice
     if args.config_path:
         config_path = args.config_path
-    elif args.llm_provider == 'local':
-        config_path = os.path.join(REPO_ROOT, "configs/local_qwen80b.yaml")
-        print("Using local LLM provider (Qwen 80B)")
     else:
-        config_path = os.path.join(REPO_ROOT, "configs/minisweagent.yaml")
+        config_path = os.path.join(REPO_ROOT, "configs/minisweagent_minimal.yaml")
         print("Using remote Claude API")
     print(f"Loading config from: {config_path}")
     config = load_config(config_path)

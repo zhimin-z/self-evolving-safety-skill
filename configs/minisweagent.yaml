@@ -224,7 +224,7 @@ environment:
   environment_class: local
 
 model:
-  model_name: deepseek/deepseek-chat
+  model_name: anthropic/claude-haiku-4-5-20251001
   model_kwargs:
     temperature: 0.0
     max_tokens: 8192
