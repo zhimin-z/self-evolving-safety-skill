@@ -923,3 +923,5 @@ $ echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
 COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
 fatal: not a git repository (or any of the parent directories): .git
 
+Index 1_1: Fail, No score added
+ Last response: litellm.AuthenticationError: AuthenticationError: DeepseekException - Authentication Fails (governor) You can permanently set your API key with `mini-extra config set KEY VALUE`.
