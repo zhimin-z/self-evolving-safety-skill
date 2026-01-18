@@ -7,11 +7,5 @@
 __pycache__/
 *.py[cod]
 
-# External dependencies (ignore contents, keep directory)
-#external/*
-#!external/.gitkeep
-
-/external/susvibes
-/external/Misevolution
-/external/live-swe-agent
-/external/mini-swe-agent
+# External dependencies
+external/
