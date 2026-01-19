@@ -1,8 +1,12 @@
 """
-Shared core logic for RedCode evaluation of mini-swe-agent.
+Shared core logic for RedCode evaluation.
 
 This module contains all the common evaluation logic used by both baseline
 and evolved agent experiments, following DRY principle.
+
+Supports multiple agent backends:
+- mini-swe-agent (mini): Lightweight, simple interface
+- SWE-agent (swe): Full-featured, from Princeton/Stanford
 
 Type Safety Note:
 - MiniSWEContainerEnvironment implements the Environment Protocol structurally
@@ -17,17 +21,21 @@ import platform
 import shlex
 import sys
 import time
+from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, TYPE_CHECKING
+from typing import Any, Dict, List, Tuple, TYPE_CHECKING
 
 import yaml
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _REDCODE_EVAL = os.path.join(_REPO_ROOT, "external/RedCode/evaluation")
+_SWE_AGENT = os.path.join(_REPO_ROOT, "external/SWE-agent")
 
 if _REDCODE_EVAL not in sys.path:
     sys.path.insert(0, _REDCODE_EVAL)
+if _SWE_AGENT not in sys.path:
+    sys.path.insert(0, _SWE_AGENT)
 
 # Now imports will work both at runtime and in IDE
 from minisweagent.agents.default import DefaultAgent
@@ -114,6 +122,172 @@ class MiniSWEContainerEnvironment:
 
 
 # ============================================================================
+# Unified Agent Interface
+# ============================================================================
+
+class BaseAgent(ABC):
+    """Unified interface for all agent backends."""
+
+    @abstractmethod
+    def run(self, prompt: str) -> Tuple[str, str]:
+        """Run agent on prompt. Returns (status, message)."""
+        pass
+
+    @property
+    @abstractmethod
+    def env(self):
+        """Environment with reset_history() and get_history() methods."""
+        pass
+
+    @property
+    @abstractmethod
+    def messages(self) -> List:
+        """Conversation messages."""
+        pass
+
+    @property
+    @abstractmethod
+    def model_name(self) -> str:
+        """Model name for logging."""
+        pass
+
+
+class MiniSWEAgentWrapper(BaseAgent):
+    """Wrapper for mini-swe-agent to match unified interface."""
+
+    def __init__(self, agent: DefaultAgent):
+        self._agent = agent
+
+    def run(self, prompt: str) -> Tuple[str, str]:
+        return self._agent.run(prompt)
+
+    @property
+    def env(self):
+        return self._agent.env
+
+    @property
+    def messages(self) -> List:
+        return self._agent.messages
+
+    @property
+    def model_name(self) -> str:
+        return self._agent.model.config.model_name
+
+    @property
+    def model(self):
+        """For backward compatibility with code that accesses agent.model directly."""
+        return self._agent.model
+
+
+class SWEAgentWrapper(BaseAgent):
+    """Wrapper for SWE-agent to match unified interface."""
+
+    def __init__(self, config: Dict, container: Container, step_limit: int, timeout: int):
+        self._config = config
+        self._container = container
+        self._step_limit = step_limit
+        self._timeout = timeout
+        self._messages = []
+        self._model_name = config.get("model", {}).get("model_name", "unknown")
+
+        # Create environment wrapper for history tracking
+        env_cfg = config.get("environment", {})
+        env_timeout = timeout if timeout > 0 else env_cfg.get("timeout", 60)
+        self._env = MiniSWEContainerEnvironment(
+            container,
+            cwd=env_cfg.get("cwd", "/testbed"),
+            env=env_cfg.get("env", {}),
+            timeout=env_timeout,
+        )
+
+        # Lazy import SWE-agent components
+        try:
+            from sweagent.agent.models import get_model, ModelConfig
+            from litellm import completion
+            self._completion = completion
+        except ImportError as e:
+            raise ImportError(f"SWE-agent dependencies not installed: {e}")
+
+        # Setup model config
+        model_cfg = config.get("model", {})
+        self._model_config = {
+            "model": model_cfg.get("model_name", "anthropic/claude-haiku-4-5-20251001"),
+            "temperature": model_cfg.get("model_kwargs", {}).get("temperature", 0.0),
+            "max_tokens": model_cfg.get("model_kwargs", {}).get("max_tokens", 8192),
+        }
+
+        # Get system template
+        agent_cfg = config.get("agent", {})
+        self._system_template = agent_cfg.get("system_template", "You are a helpful assistant.")
+        self._step_limit = step_limit if step_limit > 0 else agent_cfg.get("step_limit", 6)
+
+    def run(self, prompt: str) -> Tuple[str, str]:
+        """Run SWE-agent style interaction loop."""
+        self._messages = [
+            {"role": "system", "content": self._system_template},
+            {"role": "user", "content": prompt},
+        ]
+
+        for step in range(self._step_limit):
+            try:
+                response = self._completion(
+                    model=self._model_config["model"],
+                    messages=self._messages,
+                    temperature=self._model_config["temperature"],
+                    max_tokens=self._model_config["max_tokens"],
+                )
+                assistant_msg = response.choices[0].message.content
+                self._messages.append({"role": "assistant", "content": assistant_msg})
+
+                # Extract and execute bash command
+                command = self._extract_bash_command(assistant_msg)
+                if not command:
+                    return ("complete", assistant_msg)
+
+                result = self._env.execute(command)
+                observation = f"<returncode>{result['returncode']}</returncode>\n<output>\n{result['output']}\n</output>"
+                self._messages.append({"role": "user", "content": observation})
+
+            except Exception as e:
+                return ("error", str(e))
+
+        return ("step_limit", self._messages[-1]["content"] if self._messages else "")
+
+    def _extract_bash_command(self, text: str) -> str:
+        """Extract bash command from response."""
+        import re
+        match = re.search(r'```bash\n(.*?)\n```', text, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        match = re.search(r'```\n(.*?)\n```', text, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        return ""
+
+    @property
+    def env(self):
+        return self._env
+
+    @property
+    def messages(self) -> List:
+        return self._messages
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    @property
+    def model(self):
+        """Mock model object for backward compatibility."""
+        class MockModel:
+            def __init__(self, name):
+                self.config = type('Config', (), {'model_name': name})()
+                self.n_calls = 0
+                self.cost = 0
+        return MockModel(self._model_name)
+
+
+# ============================================================================
 # Agent building
 # ============================================================================
 
@@ -128,9 +302,10 @@ def build_agent(
     container: Container,
     step_limit: int,
     timeout_override: int,
-    tool_names: List[str] = None
-) -> DefaultAgent:
-    """Build mini-swe-agent with specified configuration.
+    tool_names: List[str] = None,
+    agent_type: str = "mini"
+) -> BaseAgent:
+    """Build agent with specified configuration.
 
     Args:
         config: Agent configuration dictionary
@@ -138,10 +313,14 @@ def build_agent(
         step_limit: Maximum number of steps (<=0 uses config value)
         timeout_override: Command timeout override (<=0 uses config value)
         tool_names: Optional list of evolved tool names to make agent aware of
+        agent_type: Agent backend to use ("mini" or "swe")
 
     Returns:
-        Configured DefaultAgent instance
+        Configured agent instance matching BaseAgent interface
     """
+    # Handle SWE-agent
+    if agent_type == "swe":
+        return SWEAgentWrapper(config, container, step_limit, timeout_override)
     # Setup model
     model_cfg = config.get("model", {})
     model = LitellmModel(
@@ -194,7 +373,7 @@ code editing, searching, or other operations.
 """
         print(f"✓ Added {len(tool_names)} tools to agent awareness")
 
-    return DefaultAgent(model, environment, **agent_cfg)
+    return MiniSWEAgentWrapper(DefaultAgent(model, environment, **agent_cfg))
 
 
 # ============================================================================

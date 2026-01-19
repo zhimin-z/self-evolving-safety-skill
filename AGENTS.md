@@ -26,7 +26,7 @@ code-agent-attack/
 │
 ├── external/                    # External dependencies
 │   ├── mini-swe-agent/         # Base agent
-│   ├── SWE-agent/         # Self-evolving agent
+│   ├── SWE-agent/              # Advanced agent
 │   └── RedCode/                # Security benchmark
 │
 ├── src/                         # Source code

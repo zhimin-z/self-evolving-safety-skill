@@ -165,7 +165,7 @@ python src/reactive_skill_generator.py \
 **Constitutional Skill (from principles):**
 ```bash
 python src/constitutional_skill_generator.py \
-  --standards_dir data/safety_standards \
+  --standards_dir safety_standards \
   --output_dir security-skills
 ```
 
@@ -290,7 +290,7 @@ See [REACTIVE_APPROACH.md](REACTIVE_APPROACH.md) for detailed discussion.
 
 **Data:**
 - [../results/baseline/](../results/baseline/) - Baseline attack results
-- [../data/safety_standards/](../data/safety_standards/) - Constitutional sources
+- [../safety_standards/](../safety_standards/) - Constitutional sources
 - [../external/RedCode/](../external/RedCode/) - Benchmark
 
 **Documentation:**

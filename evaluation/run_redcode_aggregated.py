@@ -72,6 +72,11 @@ REDCODE_GEN_CATEGORIES = [
 
 SKILL_TYPES = ["reactive", "constitutional", "proactive"]
 
+AGENT_CONFIGS = {
+    "mini": "configs/minisweagent.yaml",
+    "swe": "configs/sweagent.yaml",
+}
+
 MAX_SKILL_CHARS = 14000
 CHUNK_SIZE_CHARS = 6000
 
@@ -947,6 +952,7 @@ def eval_exec_cases(
     skill_type: str,
     run_idx: int,
     dry_run: bool,
+    agent_type: str = "mini",
 ):
     """Evaluate agent on specific RedCode-Exec cases."""
     from redcode_eval_core import run_prompt, format_history
@@ -978,7 +984,7 @@ def eval_exec_cases(
                 continue
 
             container = container_factory()
-            agent = build_agent(config, container, step_limit, timeout)
+            agent = build_agent(config, container, step_limit, timeout, agent_type=agent_type)
 
             try:
                 agent.env.reset_history()
@@ -1065,6 +1071,7 @@ def eval_gen_cases(
     skill_type: str,
     run_idx: int,
     dry_run: bool,
+    agent_type: str = "mini",
 ):
     """Evaluate agent on specific RedCode-Gen cases."""
     log_dir = os.path.join(result_base, "log")
@@ -1083,7 +1090,7 @@ def eval_gen_cases(
             continue
 
         container = container_factory()
-        agent = build_agent(config, container, step_limit, timeout)
+        agent = build_agent(config, container, step_limit, timeout, agent_type=agent_type)
 
         try:
             agent.env.reset_history()
@@ -1164,6 +1171,7 @@ def run_reactive_proactive_experiment(
     agent_name: str,
     model_name: str,
     dry_run: bool,
+    agent_type: str = "mini",
 ):
     """Run N iterations of skill generation + evaluation with 50/50 train/test splits.
 
@@ -1252,6 +1260,7 @@ def run_reactive_proactive_experiment(
                 skill_type=skill_type,
                 run_idx=run_idx,
                 dry_run=dry_run,
+                agent_type=agent_type,
             )
 
         if gen_test:
@@ -1267,6 +1276,7 @@ def run_reactive_proactive_experiment(
                 skill_type=skill_type,
                 run_idx=run_idx,
                 dry_run=dry_run,
+                agent_type=agent_type,
             )
 
         print(f"\n[Run {run_idx}/{n_runs}] Complete!")
@@ -1300,7 +1310,7 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
 
     if skill_type == "constitutional":
         # Constitutional: Generate from safety standards
-        standards_dir = os.path.join(REPO_ROOT, "data/safety_standards")
+        standards_dir = os.path.join(REPO_ROOT, "safety_standards")
         print(f"\nLoading safety standard documents from: {standards_dir}")
 
         try:
@@ -1399,6 +1409,7 @@ def run_evaluation(
     timeout: int,
     agent_name: str,
     model_name: str,
+    agent_type: str = "mini",
 ):
     """Run RedCode evaluation."""
     # Inject skill if provided
@@ -1465,7 +1476,7 @@ def run_evaluation(
             return Container(image)
 
         def create_agent(container):
-            return build_agent(config, container, step_limit, timeout)
+            return build_agent(config, container, step_limit, timeout, agent_type=agent_type)
 
         print("Per-attack isolation: Fresh container + agent for each attack type...")
         eval_dataset(
@@ -1507,7 +1518,7 @@ def run_evaluation(
             return Container(image)
 
         def create_agent(container):
-            return build_agent(config, container, step_limit, timeout)
+            return build_agent(config, container, step_limit, timeout, agent_type=agent_type)
 
         eval_gen_category(
             category=category,
@@ -1547,8 +1558,12 @@ Examples:
     )
 
     parser.add_argument(
+        '--agent', type=str, choices=list(AGENT_CONFIGS.keys()), default='mini',
+        help='Agent to use for evaluation (default: mini)'
+    )
+    parser.add_argument(
         '--config_path', type=str, default=None,
-        help='Path to mini-swe-agent YAML config'
+        help='Path to agent YAML config (overrides --agent)'
     )
     parser.add_argument(
         '--skill', type=str, choices=SKILL_TYPES, default=None,
@@ -1591,7 +1606,7 @@ Examples:
         sys.exit(1)
 
     # Load config
-    config_path = args.config_path or os.path.join(REPO_ROOT, "configs/minisweagent.yaml")
+    config_path = args.config_path or os.path.join(REPO_ROOT, AGENT_CONFIGS[args.agent])
     print(f"Loading config from: {config_path}")
     config = load_config(config_path)
     print("Config loaded successfully")
@@ -1616,6 +1631,7 @@ Examples:
             agent_name=agent_name,
             model_name=model_name,
             dry_run=args.dry_run,
+            agent_type=args.agent,
         )
 
     elif args.skill == 'constitutional':
@@ -1638,6 +1654,7 @@ Examples:
             timeout=args.timeout,
             agent_name=agent_name,
             model_name=model_name,
+            agent_type=args.agent,
         )
 
     else:
@@ -1658,6 +1675,7 @@ Examples:
             timeout=args.timeout,
             agent_name=agent_name,
             model_name=model_name,
+            agent_type=args.agent,
         )
 
 

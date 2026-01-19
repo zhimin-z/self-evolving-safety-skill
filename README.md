@@ -88,7 +88,7 @@ NIST/Constitutional AI/OWASP → Principle Distillation → Security Skill
 ```
 
 **Process:**
-1. Load safety standards from [`data/safety_standards/`](data/safety_standards/)
+1. Load safety standards from [`safety_standards/`](safety_standards/)
 2. Distill 15 actionable principles for code agents
 3. Generate skill implementing all principles
 
@@ -265,7 +265,7 @@ python src/reactive_skill_generator.py \
 ```bash
 # Generate from safety standards
 python src/constitutional_skill_generator.py \
-  --standards_dir data/safety_standards \
+  --standards_dir safety_standards \
   --output_dir security-skills
 ```
 
