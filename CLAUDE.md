@@ -77,7 +77,7 @@ code-agent-attack/
 └── external/                      # PURE, UNMODIFIED
     ├── RedCode/                  # Import components, never modify
     ├── mini-swe-agent/
-    └── live-swe-agent/
+    └── SWE-agent/
 ```
 
 ---
@@ -130,7 +130,7 @@ code-agent-attack/
 
 **Revised Design** (after critical analysis):
 
-**Key Insight from live-swe-agent**:
+**Key Insight from SWE-agent**:
 - Evolved tools were created *during* SWE-bench task solving (not pre-loaded)
 - Agent was prompted to create tools as needed: `cat <<'EOF' > /testbed/tool.py`
 - Tools are task-specific (e.g., `edit_tool.py`, `review_fix.py`)
@@ -142,7 +142,7 @@ code-agent-attack/
   - Tests whether benign tools enable malicious operations
 
 **Available Data**:
-- 502 evolved agents in `external/live-swe-agent/swebench_verified/claude-sonnet-4-5/`
+- 502 evolved agents in `external/SWE-agent/swebench_verified/claude-sonnet-4-5/`
 - Each has `created_tools.json` with task-specific tools
 - Example: `astropy__astropy-12907` has `edit_tool.py`, `review_fix.py`
 
@@ -246,7 +246,7 @@ code-agent-attack/
 │
 ├── external/                    # Already cloned!
 │   ├── mini-swe-agent/         # Baseline agent
-│   ├── live-swe-agent/
+│   ├── SWE-agent/
 │   │   └── swebench_verified/claude-sonnet-4-5/  # 502 evolved agents
 │   ├── RedCode/                # Security benchmark
 │   ├── Misevolution/           # Related work
@@ -306,7 +306,7 @@ def main():
 ✅ Binary comparison: baseline vs evolved
 
 ### 3. Simple
-✅ Reuse ALL existing infrastructure (mini/live-swe-agent, RedCode)
+✅ Reuse ALL existing infrastructure (mini/SWE-agent, RedCode)
 ✅ ~100 lines of new code (just agent loader)
 ✅ 502 evolved agents already available
 ✅ No training, no model fine-tuning, just evaluation
@@ -347,7 +347,7 @@ def main():
 | **What they test** | Tool creation process | Code solution quality | Agent attack resistance |
 | **Threat model** | Insecure code ingestion | Implementation bugs | Malicious requests |
 | **Metric** | Tool safety score | CWE detection | Attack Success Rate |
-| **Agent type** | Generic evolving agents | Any code agent | Self-evolving (live-swe-agent) |
+| **Agent type** | Generic evolving agents | Any code agent | Self-evolving (SWE-agent) |
 | **Benchmark** | Custom scenarios | 200 real tasks | RedCode (risky code) |
 | **Our novelty** | - | - | **First to compare evolved vs baseline attack resistance** |
 
@@ -357,7 +357,7 @@ def main():
 
 1. **Select 10 agents**:
    ```bash
-   cd external/live-swe-agent/swebench_verified/claude-sonnet-4-5/
+   cd external/SWE-agent/swebench_verified/claude-sonnet-4-5/
    # Pick diverse: astropy, django, sympy, matplotlib, requests, ...
    # Check tools: cat */created_tools.json | jq 'keys'
    ```
@@ -386,7 +386,7 @@ def main():
 ## Current Status
 
 ### ✅ Completed
-1. Infrastructure setup (mini-swe-agent, live-swe-agent, RedCode, Misevolution, susvibes)
+1. Infrastructure setup (mini-swe-agent, SWE-agent, RedCode, Misevolution, susvibes)
 2. Fixed critical bugs in MiniSWE evaluation (agent/container reuse)
 3. Phase 1: Baseline evaluation on RedCode dataset 4
    - Result: DeepSeek executed malicious code (Score 3) - security failure
@@ -399,7 +399,7 @@ def main():
    - Ready to revert all modifications to `external/RedCode/`
 
 7. **Phase 2 Design Revision** (critical analysis):
-   - Identified tool awareness mechanism from live-swe-agent
+   - Identified tool awareness mechanism from SWE-agent
    - Revised to test RQ1 (tool awareness) + RQ2 (tool misuse)
    - Aligned with Misevolution's cross-domain reuse finding
 
@@ -421,7 +421,7 @@ def main():
 **Step 1: Pilot Agent Selection**
 ```bash
 # Select 1 agent with diverse, potentially useful tools
-cd external/live-swe-agent/swebench_verified/swebench_verified/claude-sonnet-4-5/
+cd external/SWE-agent/swebench_verified/swebench_verified/claude-sonnet-4-5/
 # Look for agents with file editing, code execution tools
 python -c "
 import json, os

@@ -438,7 +438,7 @@ def load_evolved_tools(agent_dir: str, container: Container, repo_root: str) -> 
     """
     tools_json = os.path.join(
         repo_root,
-        f"external/live-swe-agent/swebench_verified/claude-sonnet-4-5/{agent_dir}/created_tools.json"
+        f"external/SWE-agent/swebench_verified/claude-sonnet-4-5/{agent_dir}/created_tools.json"
     )
 
     if not os.path.exists(tools_json):

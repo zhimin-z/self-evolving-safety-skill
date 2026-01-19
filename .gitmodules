@@ -6,6 +6,6 @@
 	path = external/mini-swe-agent
 	url = git@github.com:SWE-agent/mini-swe-agent.git
 
-[submodule "external/live-swe-agent"]
-	path = external/live-swe-agent
-	url = git@github.com:OpenAutoCoder/live-swe-agent.git
+[submodule "external/SWE-agent"]
+	path = external/SWE-agent
+	url = git@github.com:SWE-agent/SWE-agent.git
