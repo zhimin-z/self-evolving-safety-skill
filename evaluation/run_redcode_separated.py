@@ -33,6 +33,7 @@ import datetime
 import json
 import os
 import sys
+import time
 from collections import Counter
 
 # ============================================================================
@@ -55,6 +56,7 @@ from redcode_eval_core import (
     CODE_GENERATION_PROMPT,
     # Utilities
     load_config,
+    get_model_full_name,
     get_model_short_name,
     get_agent_name,
     get_exec_dataset_ids,
@@ -104,9 +106,7 @@ def run_reactive_proactive_experiment(
     benchmark_dir = os.path.join(REPO_ROOT, "external/RedCode/dataset")
     output_dir = os.path.join(REPO_ROOT, "security-skills")
     result_base = os.path.join(REPO_ROOT, "results/with_skills")
-    log_dir = os.path.join(result_base, "log")
     os.makedirs(result_base, exist_ok=True)
-    os.makedirs(log_dir, exist_ok=True)
 
     # Determine which datasets to process
     exec_ids = []
@@ -128,9 +128,10 @@ def run_reactive_proactive_experiment(
     print(f"Split: {split}, Datasets: {all_dataset_ids}")
     print("=" * 60)
 
+    start_time = time.time()
+
     # Collect results from all datasets
     aggregated_results = []
-    aggregated_logs = {}
 
     for idx, dataset_id in enumerate(all_dataset_ids, 1):
         print(f"\n{'='*60}")
@@ -178,7 +179,6 @@ def run_reactive_proactive_experiment(
         print(f"\n  Evaluating skill on {len(test_cases)} test cases...")
 
         dataset_results = []
-        dataset_logs = {}
 
         for case in test_cases:
             case_id = case["index"] if is_exec else f"{case['dataset_id']}_{case['index']}"
@@ -186,7 +186,6 @@ def run_reactive_proactive_experiment(
 
             if dry_run:
                 dataset_results.append({"case_id": case_id, "score": 1, "reason": "dry_run"})
-                dataset_logs[case_id] = {"response": "dry_run"}
                 continue
 
             container = create_container()
@@ -220,11 +219,6 @@ def run_reactive_proactive_experiment(
                     "score": score,
                     "status": status,
                 })
-                dataset_logs[case_id] = {
-                    "response": response,
-                    "score": score,
-                    "messages": agent.messages,
-                }
 
             except Exception as exc:
                 dataset_results.append({
@@ -233,7 +227,6 @@ def run_reactive_proactive_experiment(
                     "score": 1,
                     "error": str(exc),
                 })
-                dataset_logs[case_id] = {"error": str(exc)}
 
             finally:
                 container.close()
@@ -242,7 +235,6 @@ def run_reactive_proactive_experiment(
 
         # Collect results
         aggregated_results.extend(dataset_results)
-        aggregated_logs.update(dataset_logs)
 
         # Print per-dataset summary
         scores = [r['score'] for r in dataset_results]
@@ -260,13 +252,27 @@ def run_reactive_proactive_experiment(
     print("Aggregating final results...")
     print(f"{'='*60}")
 
+    duration = time.time() - start_time
     all_scores = [r['score'] for r in aggregated_results]
     final_score_dist = dict(Counter(all_scores))
+
+    # Generate filename
+    time_now = datetime.datetime.now()
+    time_stamp = time_now.strftime("%Y-%m-%d_%H-%M-%S")
 
     final_eval_log = {
         "Skill": skill_type,
         "Split": split,
         "Datasets": all_dataset_ids,
+        "Agent": agent_name,
+        "Model": get_model_full_name(config),
+        "Timestamp": time_stamp,
+        "Duration (seconds)": round(duration, 2),
+        "Config": {
+            "step_limit": step_limit,
+            "timeout": timeout,
+            "dry_run": dry_run,
+        },
         "Total Cases": len(aggregated_results),
         "Score Distribution": final_score_dist,
         "Refusal Rate (score=0)": all_scores.count(0) / len(all_scores) if all_scores else 0,
@@ -274,25 +280,19 @@ def run_reactive_proactive_experiment(
         "Per-Case Results": aggregated_results,
     }
 
-    # Generate filename
-    time_now = datetime.datetime.now()
-    time_stamp = time_now.strftime("%Y-%m-%d_%H-%M-%S")
     dataset_str = "-".join(all_dataset_ids) if len(all_dataset_ids) <= 5 else f"{len(all_dataset_ids)}datasets"
     resfile = os.path.join(result_base, f"{split}_{dataset_str}_{skill_type}_{agent_name}_{model_name}_{time_stamp}.json")
-    logfile = os.path.join(log_dir, f"{split}_{dataset_str}_{skill_type}_{agent_name}_{model_name}_{time_stamp}_log.json")
 
     with open(resfile, "w") as f:
         json.dump(final_eval_log, f, indent=2)
-    with open(logfile, "w") as f:
-        json.dump(aggregated_logs, f, indent=2)
 
     print(f"\nFinal Results:")
     print(f"  Total cases: {len(aggregated_results)}")
     print(f"  Score distribution: {final_score_dist}")
     print(f"  Refusal rate: {final_eval_log['Refusal Rate (score=0)']:.2%}")
     print(f"  Attack success rate: {final_eval_log['Attack Success Rate (score=3)']:.2%}")
+    print(f"  Duration: {duration:.1f}s")
     print(f"\nResults saved to: {resfile}")
-    print(f"Logs saved to: {logfile}")
     print(f"{'='*60}\n")
 
 
@@ -325,7 +325,7 @@ Examples:
     )
     parser.add_argument(
         '--model', type=str, default=None,
-        help='Model to use (e.g., anthropic/claude-sonnet-4-20250514). Overrides config file.'
+        help='Model to use (e.g., anthropic/anthropic/claude-haiku-4-5-20251001). Overrides config file.'
     )
     parser.add_argument(
         '--config_path', type=str, default=None,

@@ -228,7 +228,7 @@ Examples:
     )
     parser.add_argument(
         '--model', type=str, default=None,
-        help='Model to use (e.g., anthropic/claude-sonnet-4-20250514). Overrides config file.'
+        help='Model to use (e.g., anthropic/anthropic/claude-haiku-4-5-20251001). Overrides config file.'
     )
     parser.add_argument(
         '--config_path', type=str, default=None,
@@ -251,8 +251,8 @@ Examples:
         help='Evaluate all datasets in the specified split'
     )
     parser.add_argument(
-        '--n_runs', type=int, default=5,
-        help='Number of random train/test splits for reactive/proactive (default: 5)'
+        '--n_runs', type=int, default=1,
+        help='Number of random train/test splits for reactive/proactive (default: 1)'
     )
     parser.add_argument(
         '--dry_run', action='store_true',

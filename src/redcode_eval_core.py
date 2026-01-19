@@ -433,8 +433,8 @@ def format_history(exec_history: List[Dict[str, str]]) -> str:
     return "\n\n".join(chunks)
 
 
-def save_result(eval_log_json: Dict, agent_log: Dict, resfile: str, logfile: str):
-    """Save evaluation results and detailed logs."""
+def save_result(eval_log_json: Dict, resfile: str):
+    """Save evaluation results."""
     os.makedirs(os.path.dirname(resfile), exist_ok=True)
     print(json.dumps(eval_log_json, indent=4))
 
@@ -449,19 +449,6 @@ def save_result(eval_log_json: Dict, agent_log: Dict, resfile: str, logfile: str
     res_records.append(eval_log_json)
     with open(resfile, "w", encoding="utf-8") as file:
         json.dump(res_records, file, indent=4)
-
-    # Save detailed agent logs
-    os.makedirs(os.path.dirname(logfile), exist_ok=True)
-    try:
-        with open(logfile, "r", encoding="utf-8") as file:
-            existing = json.load(file)
-    except FileNotFoundError:
-        existing = {}
-    if not isinstance(existing, dict):
-        existing = {}
-    existing.update(agent_log)
-    with open(logfile, "w", encoding="utf-8") as file:
-        json.dump(existing, file, indent=4)
 
 
 def run_prompt(
@@ -543,7 +530,6 @@ def eval_dataset(
     agent_factory: callable,
     jsonfile: str,
     resfile: str,
-    logfile: str,
     result_base_dir: str,
     dry_run: bool,
     case_limit: int = -1,
@@ -556,7 +542,6 @@ def eval_dataset(
         agent_factory: Function that creates a new agent given a container
         jsonfile: Path to RedCode dataset JSON
         resfile: Path to save results
-        logfile: Path to save detailed logs
         result_base_dir: Base directory for evaluation outputs
         dry_run: If True, skip actual execution
         case_limit: Limit number of test cases (<=0 for all)
@@ -567,9 +552,9 @@ def eval_dataset(
     if case_limit and case_limit > 0:
         data = data[:case_limit]
 
-    agent_log: Dict[str, Dict[str, Any]] = {}
     all_input_types = ["code_input", "code_input_jailbreaking", "text_summary", "text_details"]
     res_prompt_type = {input_type: [] for input_type in all_input_types}
+    base_model = None
 
     start_time = time.time()
 
@@ -593,56 +578,51 @@ def eval_dataset(
             "text_details": item["Text_details"],
         }
 
-        agent_log[index] = {}
-
         # Test all prompt types with FRESH container + agent for each
         for input_type in all_input_types:
             prompt = prompt_map[input_type]
-            
+
             # Create fresh container and agent for this attack
             print(f"  Creating fresh container for {input_type}...")
             container = container_factory()
-            # container is now src.container.Container which has a safe close() method
             agent = agent_factory(container)
-            agent_log[index]["base_model"] = agent.model.config.model_name
-            
+            if base_model is None:
+                base_model = agent.model.config.model_name
+
             try:
                 prompt_result = run_prompt(
                     index, prompt, input_type, agent, container,
                     jsonfile, result_base_dir, dry_run
                 )
                 res_prompt_type[input_type].append(prompt_result["result"])
-                agent_log[index][input_type] = prompt_result
             except Exception as exc:  # pylint: disable=broad-except
                 res_prompt_type[input_type].append(1)
-                agent_log[index][input_type] = {
-                    "result": 1,
-                    "error": str(exc),
-                }
             finally:
                 # Clean up container after each attack
                 container.close()
-                    
+
         print(f" ----- {index} done")
 
     duration = time.time() - start_time
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     # Compile final results
     eval_log_json = {
         "Index": dataset_id,
         "Jsonfile": jsonfile,
         "Task": "python_eval",
-        "Base Model": agent_log[list(agent_log.keys())[0]]["base_model"] if agent_log else "unknown",
+        "Base Model": base_model or "unknown",
+        "Timestamp": timestamp,
+        "Duration (seconds)": round(duration, 2),
         "Final Result": {
             "Code": dict(Counter(res_prompt_type["code_input"])),
             "Code w/ jb": dict(Counter(res_prompt_type["code_input_jailbreaking"])),
             "Summary": dict(Counter(res_prompt_type["text_summary"])),
             "Details": dict(Counter(res_prompt_type["text_details"])),
         },
-        "Duration": str(duration),
     }
 
-    save_result(eval_log_json, agent_log, resfile, logfile)
+    save_result(eval_log_json, resfile)
 
 
 def load_evolved_tools(agent_dir: str, container: Container, repo_root: str) -> List[str]:
@@ -686,9 +666,14 @@ def load_evolved_tools(agent_dir: str, container: Container, repo_root: str) -> 
 # Shared Utility Functions
 # ============================================================================
 
+def get_model_full_name(config: dict) -> str:
+    """Get full model name from config (for metadata)."""
+    return config.get("model", {}).get("model_name", "unknown")
+
+
 def get_model_short_name(config: dict) -> str:
     """Extract a short model name from config for filenames."""
-    model_name = config.get("model", {}).get("model_name", "unknown")
+    model_name = get_model_full_name(config)
     if "/" in model_name:
         model_name = model_name.split("/")[-1]
     parts = model_name.rsplit("-", 1)
@@ -852,29 +837,27 @@ def eval_gen_category(
     container_factory: Callable,
     agent_factory: Callable,
     resfile: str,
-    logfile: str,
     dry_run: bool,
 ):
     """Evaluate agent on RedCode-Gen category (malware code generation)."""
     results = []
-    agent_log = {}
     start_time = time.time()
+    base_model = None
 
     for case in cases:
         case_id = f"{case['category']}_{case['filename']}"
         print(f"  Processing: {case_id}")
 
         prompt = CODE_GENERATION_PROMPT + case['content']
-        agent_log[case_id] = {"category": case['category'], "filename": case['filename']}
 
         if dry_run:
             results.append({"case_id": case_id, "score": 1, "reason": "dry_run"})
-            agent_log[case_id]["response"] = "dry_run"
             continue
 
         container = container_factory()
         agent = agent_factory(container)
-        agent_log[case_id]["base_model"] = agent.model.config.model_name
+        if base_model is None:
+            base_model = agent.model.config.model_name
 
         try:
             agent.env.reset_history()
@@ -894,9 +877,6 @@ def eval_gen_category(
                 "score": score,
                 "status": status,
             })
-            agent_log[case_id]["response"] = response
-            agent_log[case_id]["score"] = score
-            agent_log[case_id]["messages"] = agent.messages
 
         except Exception as exc:
             results.append({
@@ -904,7 +884,6 @@ def eval_gen_category(
                 "score": 1,
                 "error": str(exc),
             })
-            agent_log[case_id]["error"] = str(exc)
 
         finally:
             container.close()
@@ -914,15 +893,18 @@ def eval_gen_category(
     duration = time.time() - start_time
     scores = [r['score'] for r in results]
     score_dist = dict(Counter(scores))
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     eval_log = {
         "Category": category,
         "Task": "code_generation",
+        "Model": base_model or "unknown",
+        "Timestamp": timestamp,
+        "Duration (seconds)": round(duration, 2),
         "Total Cases": len(cases),
         "Score Distribution": score_dist,
         "Refusal Rate (score=0)": scores.count(0) / len(scores) if scores else 0,
         "Attack Success Rate (score=3)": scores.count(3) / len(scores) if scores else 0,
-        "Duration": str(duration),
         "Results": results,
     }
 
@@ -931,10 +913,6 @@ def eval_gen_category(
 
     with open(resfile, "w", encoding="utf-8") as f:
         json.dump(eval_log, f, indent=2)
-
-    os.makedirs(os.path.dirname(logfile), exist_ok=True)
-    with open(logfile, "w", encoding="utf-8") as f:
-        json.dump(agent_log, f, indent=2)
 
 
 # ============================================================================
@@ -1544,8 +1522,8 @@ def eval_exec_cases(
     agent_type: str = "mini",
 ):
     """Evaluate agent on specific RedCode-Exec cases."""
-    log_dir = os.path.join(result_base, "log")
-    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(result_base, exist_ok=True)
+    start_time = time.time()
 
     # Group cases by dataset_id for result organization
     by_dataset: Dict[str, List[Dict]] = defaultdict(list)
@@ -1553,13 +1531,11 @@ def eval_exec_cases(
         by_dataset[case["dataset_id"]].append(case)
 
     all_results = []
-    all_logs = {}
 
     for dataset_id, dataset_cases in sorted(by_dataset.items()):
         print(f"\n  [RedCode-Exec] Evaluating {len(dataset_cases)} cases from dataset {dataset_id}...")
 
         dataset_results = []
-        dataset_logs = {}
 
         for case in dataset_cases:
             case_id = case["index"]
@@ -1567,7 +1543,6 @@ def eval_exec_cases(
 
             if dry_run:
                 dataset_results.append({"case_id": case_id, "score": 1, "reason": "dry_run"})
-                dataset_logs[case_id] = {"response": "dry_run"}
                 continue
 
             container = container_factory()
@@ -1593,11 +1568,6 @@ def eval_exec_cases(
                     "score": score,
                     "status": status,
                 })
-                dataset_logs[case_id] = {
-                    "response": response,
-                    "score": score,
-                    "messages": agent.messages,
-                }
 
             except Exception as exc:
                 dataset_results.append({
@@ -1605,7 +1575,6 @@ def eval_exec_cases(
                     "score": 1,
                     "error": str(exc),
                 })
-                dataset_logs[case_id] = {"error": str(exc)}
 
             finally:
                 container.close()
@@ -1613,16 +1582,26 @@ def eval_exec_cases(
             print(f"      Score: {dataset_results[-1]['score']}")
 
         all_results.extend(dataset_results)
-        all_logs.update(dataset_logs)
 
     # Save aggregated results
+    duration = time.time() - start_time
     scores = [r['score'] for r in all_results]
     score_dist = dict(Counter(scores))
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     eval_log = {
         "Split": "exec",
         "Skill": skill_type,
         "Run": run_idx,
+        "Agent": agent_name,
+        "Model": get_model_full_name(config),
+        "Timestamp": timestamp,
+        "Duration (seconds)": round(duration, 2),
+        "Config": {
+            "step_limit": step_limit,
+            "timeout": timeout,
+            "dry_run": dry_run,
+        },
         "Total Cases": len(cases),
         "Score Distribution": score_dist,
         "Refusal Rate (score=0)": scores.count(0) / len(scores) if scores else 0,
@@ -1633,14 +1612,9 @@ def eval_exec_cases(
     resfile = os.path.join(result_base, generate_result_filename(
         "exec", "pooled", agent_name, model_name, skill_type, run_idx
     ))
-    logfile = os.path.join(log_dir, generate_result_filename(
-        "exec", "pooled", agent_name, model_name, skill_type, run_idx, suffix="_log"
-    ))
 
     with open(resfile, "w") as f:
         json.dump(eval_log, f, indent=2)
-    with open(logfile, "w") as f:
-        json.dump(all_logs, f, indent=2)
 
     print(f"\n  Results saved to: {resfile}")
     return eval_log
@@ -1661,11 +1635,10 @@ def eval_gen_cases(
     agent_type: str = "mini",
 ):
     """Evaluate agent on specific RedCode-Gen cases."""
-    log_dir = os.path.join(result_base, "log")
-    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(result_base, exist_ok=True)
+    start_time = time.time()
 
     all_results = []
-    all_logs = {}
 
     for case in cases:
         case_id = f"{case['dataset_id']}_{case['index']}"
@@ -1673,7 +1646,6 @@ def eval_gen_cases(
 
         if dry_run:
             all_results.append({"case_id": case_id, "score": 1, "reason": "dry_run"})
-            all_logs[case_id] = {"response": "dry_run"}
             continue
 
         container = container_factory()
@@ -1696,11 +1668,6 @@ def eval_gen_cases(
                 "score": score,
                 "status": status,
             })
-            all_logs[case_id] = {
-                "response": response,
-                "score": score,
-                "messages": agent.messages,
-            }
 
         except Exception as exc:
             all_results.append({
@@ -1708,7 +1675,6 @@ def eval_gen_cases(
                 "score": 1,
                 "error": str(exc),
             })
-            all_logs[case_id] = {"error": str(exc)}
 
         finally:
             container.close()
@@ -1716,13 +1682,24 @@ def eval_gen_cases(
         print(f"      Score: {all_results[-1]['score']}")
 
     # Save aggregated results
+    duration = time.time() - start_time
     scores = [r['score'] for r in all_results]
     score_dist = dict(Counter(scores))
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     eval_log = {
         "Split": "gen",
         "Skill": skill_type,
         "Run": run_idx,
+        "Agent": agent_name,
+        "Model": get_model_full_name(config),
+        "Timestamp": timestamp,
+        "Duration (seconds)": round(duration, 2),
+        "Config": {
+            "step_limit": step_limit,
+            "timeout": timeout,
+            "dry_run": dry_run,
+        },
         "Total Cases": len(cases),
         "Score Distribution": score_dist,
         "Refusal Rate (score=0)": scores.count(0) / len(scores) if scores else 0,
@@ -1733,14 +1710,9 @@ def eval_gen_cases(
     resfile = os.path.join(result_base, generate_result_filename(
         "gen", "pooled", agent_name, model_name, skill_type, run_idx
     ))
-    logfile = os.path.join(log_dir, generate_result_filename(
-        "gen", "pooled", agent_name, model_name, skill_type, run_idx, suffix="_log"
-    ))
 
     with open(resfile, "w") as f:
         json.dump(eval_log, f, indent=2)
-    with open(logfile, "w") as f:
-        json.dump(all_logs, f, indent=2)
 
     print(f"\n  Results saved to: {resfile}")
     return eval_log
@@ -1881,8 +1853,6 @@ def run_evaluation(
         result_base = os.path.join(REPO_ROOT, "results/baseline")
 
     os.makedirs(result_base, exist_ok=True)
-    log_dir = os.path.join(result_base, "log")
-    os.makedirs(log_dir, exist_ok=True)
     print(f"Results will be saved to: {result_base}")
 
     # Dataset paths
@@ -1924,7 +1894,6 @@ def run_evaluation(
         print(f"{'='*60}\n")
 
         resfile = os.path.join(result_base, generate_result_filename("exec", dataset_id, agent_name, model_name, skill_type))
-        logfile = os.path.join(log_dir, generate_result_filename("exec", dataset_id, agent_name, model_name, skill_type, suffix="_log"))
 
         if dry_run:
             print("DRY RUN MODE: Skipping execution")
@@ -1945,7 +1914,6 @@ def run_evaluation(
             agent_factory=create_agent,
             jsonfile=str(jsonfile),
             resfile=resfile,
-            logfile=logfile,
             result_base_dir=result_base,
             dry_run=dry_run,
         )
@@ -1966,7 +1934,6 @@ def run_evaluation(
         print(f"{'='*60}\n")
 
         resfile = os.path.join(result_base, generate_result_filename("gen", category, agent_name, model_name, skill_type))
-        logfile = os.path.join(log_dir, generate_result_filename("gen", category, agent_name, model_name, skill_type, suffix="_log"))
 
         if dry_run:
             print("DRY RUN MODE: Skipping execution")
@@ -1986,7 +1953,6 @@ def run_evaluation(
             container_factory=create_container,
             agent_factory=create_agent,
             resfile=resfile,
-            logfile=logfile,
             dry_run=dry_run,
         )
 
