@@ -1558,7 +1558,7 @@ def run_evaluation(
         print(f"{'='*60}\n")
 
         resfile = os.path.join(result_base, generate_result_filename("exec", dataset_id, agent_name, model_name, skill_type))
-        logfile = os.path.join(log_dir, generate_result_filename("exec", dataset_id, agent_name, model_name, skill_type, "_log"))
+        logfile = os.path.join(log_dir, generate_result_filename("exec", dataset_id, agent_name, model_name, skill_type, suffix="_log"))
 
         if dry_run:
             print("DRY RUN MODE: Skipping execution")
@@ -1600,7 +1600,7 @@ def run_evaluation(
         print(f"{'='*60}\n")
 
         resfile = os.path.join(result_base, generate_result_filename("gen", category, agent_name, model_name, skill_type))
-        logfile = os.path.join(log_dir, generate_result_filename("gen", category, agent_name, model_name, skill_type, "_log"))
+        logfile = os.path.join(log_dir, generate_result_filename("gen", category, agent_name, model_name, skill_type, suffix="_log"))
 
         if dry_run:
             print("DRY RUN MODE: Skipping execution")
