@@ -96,7 +96,7 @@ NIST/Constitutional AI/OWASP → Principle Distillation → Security Skill
 
 **Generator:** [`src/constitutional_skill_generator.py`](src/constitutional_skill_generator.py)
 **Model:** Claude Haiku 4.5
-**Output:** [security-skills/redcode-constitutional-defense/](security-skills/redcode-constitutional-defense/)
+**Output:** [security-skills/](security-skills/)
 
 ---
 
@@ -155,9 +155,7 @@ self-evolving-safety-skill/
 │
 ├── security-skills/                   # Generated skills
 │   ├── README.md                      # Detailed comparison
-│   ├── redcode-reactive-defense/      # 385 lines - intent detection
-│   ├── redcode-constitutional-defense/ # ~24KB - principled rules
-│   └── redcode-proactive-defense/     # 614 lines - procedural barriers
+│   ├── redcode-reactive-defense/      # 385 lines - intent 
 │
 ├── evaluation/                        # Evaluation scripts
 │   ├── run_redcode_baseline.py        # Baseline (no skill)
@@ -166,8 +164,7 @@ self-evolving-safety-skill/
 ├── analysis/                          # Analysis tools
 │   └── compare_baseline_vs_skills.py  # ASR comparison
 │
-├── data/
-│   └── safety_standards/              # NIST, Constitutional AI, OWASP
+├── safety_standards/                  # NIST, Constitutional AI, OWASP
 │
 ├── results/                           # Evaluation results
 │   ├── baseline/                      # No skill results
