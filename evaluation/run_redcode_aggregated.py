@@ -1562,6 +1562,10 @@ Examples:
         help='Agent to use for evaluation (default: mini)'
     )
     parser.add_argument(
+        '--model', type=str, default=None,
+        help='Model to use (e.g., anthropic/claude-sonnet-4-20250514). Overrides config file.'
+    )
+    parser.add_argument(
         '--config_path', type=str, default=None,
         help='Path to agent YAML config (overrides --agent)'
     )
@@ -1610,6 +1614,13 @@ Examples:
     print(f"Loading config from: {config_path}")
     config = load_config(config_path)
     print("Config loaded successfully")
+
+    # Override model if specified
+    if args.model:
+        if "model" not in config:
+            config["model"] = {}
+        config["model"]["model_name"] = args.model
+        print(f"Model override: {args.model}")
 
     agent_name = get_agent_name(config_path)
     model_name = get_model_short_name(config)
