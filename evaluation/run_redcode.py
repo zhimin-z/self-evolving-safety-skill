@@ -1,28 +1,22 @@
 #!/usr/bin/env python3
 """
-Unified RedCode evaluation and skill generation script.
+RedCode evaluation script with optional skill generation.
 
-Consolidates baseline evaluation, skill-enhanced evaluation, and skill generation
-into a single entry point with subcommands.
+If --skill is specified, generates the skill first then evaluates with it.
+If --skill is omitted, runs baseline evaluation (no skill).
 
 Usage:
-    # Evaluation: Baseline (no skills)
-    python evaluation/run_redcode.py evaluate --split exec --dataset_ids 4
-    python evaluation/run_redcode.py evaluate --split exec --all
+    # Baseline evaluation (no skill)
+    python evaluation/run_redcode.py --split exec --dataset_ids 4
+    python evaluation/run_redcode.py --split exec --all
 
-    # Evaluation: With security skills
-    python evaluation/run_redcode.py evaluate --skill reactive --split exec --dataset_ids 4
-    python evaluation/run_redcode.py evaluate --skill constitutional --split gen --all
-    python evaluation/run_redcode.py evaluate --skill proactive --split all --all
-
-    # Skill Generation
-    python evaluation/run_redcode.py generate --skill reactive
-    python evaluation/run_redcode.py generate --skill constitutional
-    python evaluation/run_redcode.py generate --skill proactive --split exec --dataset_ids 4 5
+    # With skill: generate + evaluate
+    python evaluation/run_redcode.py --skill reactive --split exec --dataset_ids 4
+    python evaluation/run_redcode.py --skill constitutional --split gen --all
+    python evaluation/run_redcode.py --skill proactive --split all --all
 
     # Dry run
-    python evaluation/run_redcode.py evaluate --split exec --dataset_ids 4 --dry_run
-    python evaluation/run_redcode.py generate --skill reactive --split exec --dataset_ids 4
+    python evaluation/run_redcode.py --split exec --dataset_ids 4 --dry_run
 """
 
 import argparse
@@ -297,50 +291,15 @@ def eval_gen_category(
 
 
 # ============================================================================
-# Skill Loading (for evaluation with skills)
+# Skill Injection (for evaluation with skills)
 # ============================================================================
 
-def load_skill(skills_dir: str, skill_type: str) -> str:
-    """Load security skill content from the skills directory."""
-    skill_dirs = {
-        "reactive": "redcode-reactive-defense",
-        "constitutional": "redcode-constitutional-defense",
-        "proactive": "redcode-proactive-defense"
-    }
-
-    if skill_type not in skill_dirs:
-        raise ValueError(f"Invalid skill_type: {skill_type}. Must be one of {SKILL_TYPES}")
-
-    skill_path = Path(skills_dir) / skill_dirs[skill_type] / "SKILL.md"
-
-    if not skill_path.exists():
-        raise FileNotFoundError(f"{skill_type.capitalize()} skill not found at: {skill_path}")
-
-    with open(skill_path) as f:
-        skill_content = f.read()
-
-    # Extract content after YAML frontmatter
-    parts = skill_content.split("---")
-    if len(parts) >= 3:
-        skill_markdown = "---".join(parts[2:]).strip()
-    else:
-        skill_markdown = skill_content.strip()
-
-    return skill_markdown
-
-
-def inject_skill_into_config(config: dict, skill_content: str, skill_type: str) -> dict:
+def inject_skill_into_config(config: dict, skill_content: str, skill_name: str) -> dict:
     """Inject security skill at the TOP of agent's system template."""
     current_template = config.get("agent", {}).get("system_template", "")
 
-    skill_labels = {
-        "reactive": "Reactive Malicious Code Defense",
-        "constitutional": "Constitutional Malicious Code Defense",
-        "proactive": "Proactive Malicious Code Defense"
-    }
-
     enhanced_template = f"""# ============================================================
-# SECURITY SKILL: {skill_labels.get(skill_type, "Security Defense")}
+# SECURITY SKILL: {skill_name}
 # ============================================================
 
 {skill_content}
@@ -818,68 +777,173 @@ Return ONLY the updated skill content:"""
         return None
 
 
+def generate_skill_filename(
+    skill_type: str,
+    split: Optional[str] = None,
+    dataset_ids: Optional[List[str]] = None,
+) -> str:
+    """Generate a descriptive skill filename.
+
+    Format: {skill_type}_{split}_{dataset_ids}.md
+    Example: reactive_all.md, proactive_exec_4-5-6.md, constitutional.md
+    """
+    parts = [skill_type]
+
+    if split:
+        parts.append(split)
+
+    if dataset_ids:
+        parts.append("-".join(dataset_ids))
+
+    return "_".join(parts) + ".md"
+
+
 def save_skill(
     skill_content: str,
     skill_type: str,
     output_dir: str,
-    metadata: dict
+    split: Optional[str] = None,
+    dataset_ids: Optional[List[str]] = None,
 ):
     """Save generated skill to output directory."""
-    skill_dir_names = {
-        "reactive": "redcode-reactive-defense",
-        "constitutional": "redcode-constitutional-defense",
-        "proactive": "redcode-proactive-defense"
-    }
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
 
-    skill_dir = Path(output_dir) / skill_dir_names[skill_type]
-    skill_dir.mkdir(parents=True, exist_ok=True)
+    filename = generate_skill_filename(skill_type, split, dataset_ids)
+    skill_file = output_path / filename
 
-    skill_file = skill_dir / "SKILL.md"
     with open(skill_file, "w") as f:
         f.write(skill_content)
 
-    metadata_file = skill_dir / "metadata.json"
-    with open(metadata_file, "w") as f:
-        json.dump(metadata, f, indent=2)
-
-    print(f"\nSaved {skill_type} skill to: {skill_dir}")
+    print(f"\nSaved skill to: {skill_file}")
 
 
 # ============================================================================
-# Main Commands
+# Main
 # ============================================================================
 
-def cmd_evaluate(args):
-    """Run RedCode evaluation (baseline or with skills)."""
-    # Validate arguments
-    if not args.all and not args.dataset_ids:
-        print("Error: Must specify --dataset_ids or --all")
-        sys.exit(1)
+def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]) -> str:
+    """Generate security skill and return its content.
 
-    # Load config
-    config_path = args.config_path or os.path.join(REPO_ROOT, "configs/minisweagent.yaml")
-    print(f"Loading config from: {config_path}")
-    config = load_config(config_path)
-    print("Config loaded successfully")
+    Args:
+        skill_type: reactive, constitutional, or proactive
+        split: exec, gen, or all
+        dataset_ids: specific dataset IDs
 
-    agent_name = get_agent_name(config_path)
-    model_name = get_model_short_name(config)
-    print(f"Agent: {agent_name}")
-    print(f"Model: {model_name}")
+    Returns:
+        Generated skill content
+    """
+    output_dir = os.path.join(REPO_ROOT, "security-skills")
 
-    # Load skill if specified
-    skill_type = args.skill
-    if skill_type:
-        skills_dir = args.skills_dir or os.path.join(REPO_ROOT, "security-skills")
-        print(f"\nLoading {skill_type} skill from: {skills_dir}")
+    print("=" * 60)
+    print(f"[1/2] Generating {skill_type} skill")
+    print("=" * 60)
+
+    if skill_type == "constitutional":
+        # Constitutional: Generate from safety standards
+        standards_dir = os.path.join(REPO_ROOT, "data/safety_standards")
+        print(f"\nLoading safety standard documents from: {standards_dir}")
+
         try:
-            skill_content = load_skill(skills_dir, skill_type)
-            skill_lines = len(skill_content.split('\n'))
-            print(f"{skill_type.capitalize()} skill loaded ({skill_lines} lines)")
-        except (FileNotFoundError, ValueError) as e:
+            documents = load_safety_documents(standards_dir)
+        except FileNotFoundError as e:
             print(f"Error: {e}")
+            print(f"\nCreate the directory and add safety documents:")
+            print(f"  mkdir -p {standards_dir}")
             sys.exit(1)
 
+        if not documents:
+            print("Error: No documents found. Add .md or .txt files to the standards directory.")
+            sys.exit(1)
+
+        print("Iteratively building constitutional skill...")
+        skill_content = None
+
+        for doc in documents:
+            for chunk_idx, chunk_total, chunk_text in iter_text_chunks(doc["content"], CHUNK_SIZE_CHARS):
+                if skill_content is None:
+                    skill_content = generate_initial_skill_constitutional(chunk_text, doc["source"])
+                else:
+                    skill_content = refine_skill(
+                        skill_content, chunk_text, doc["source"],
+                        chunk_idx, chunk_total, skill_type
+                    )
+
+                if not skill_content:
+                    print("Error: Failed to generate/refine skill")
+                    sys.exit(1)
+
+        save_skill(skill_content, skill_type, output_dir)
+
+    else:
+        # Reactive/Proactive: Generate from RedCode attacks
+        benchmark_dir = os.path.join(REPO_ROOT, "external/RedCode/dataset")
+
+        print(f"\nLoading RedCode benchmark cases...")
+        print(f"  Split: {split}")
+        if dataset_ids:
+            print(f"  Dataset IDs: {dataset_ids}")
+
+        try:
+            cases = load_redcode_datasets_for_generation(benchmark_dir, split, dataset_ids)
+        except Exception as e:
+            print(f"Error loading benchmark: {e}")
+            sys.exit(1)
+
+        if not cases:
+            print("Error: No cases found. Check benchmark directory and dataset IDs.")
+            sys.exit(1)
+
+        print(f"Iteratively building {skill_type} skill...")
+        skill_content = None
+
+        for chunk_num, total_chunks, chunk_cases in iter_case_chunks(cases, CHUNK_SIZE_CHARS):
+            case_indices = (
+                f"{chunk_cases[0]['index']}" if len(chunk_cases) == 1
+                else f"{chunk_cases[0]['index']}...{chunk_cases[-1]['index']}"
+            )
+            print(f"  [{chunk_num}/{total_chunks}] Processing {len(chunk_cases)} cases ({case_indices})...")
+
+            if skill_content is None:
+                if skill_type == "reactive":
+                    skill_content = generate_initial_skill_reactive(chunk_cases)
+                else:
+                    skill_content = generate_initial_skill_proactive(chunk_cases)
+            else:
+                chunk_content = format_chunk_content(chunk_cases)
+                skill_content = refine_skill(
+                    skill_content, chunk_content, f"RedCode {split}",
+                    chunk_num, total_chunks, skill_type
+                )
+
+            if not skill_content:
+                print("Error: Failed to generate/refine skill")
+                sys.exit(1)
+
+            print(f"  Skill updated ({len(skill_content)} chars)")
+
+        save_skill(skill_content, skill_type, output_dir, split, dataset_ids)
+
+    print(f"Skill generation complete!\n")
+    return skill_content
+
+
+def run_evaluation(
+    config: dict,
+    skill_type: Optional[str],
+    skill_content: Optional[str],
+    split: str,
+    dataset_ids: Optional[List[str]],
+    all_datasets: bool,
+    dry_run: bool,
+    step_limit: int,
+    timeout: int,
+    agent_name: str,
+    model_name: str,
+):
+    """Run RedCode evaluation."""
+    # Inject skill if provided
+    if skill_type and skill_content:
         print("Injecting skill into agent's system prompt...")
         config = inject_skill_into_config(config, skill_content, skill_type)
         result_base = os.path.join(REPO_ROOT, "results/with_skills")
@@ -889,7 +953,7 @@ def cmd_evaluate(args):
     os.makedirs(result_base, exist_ok=True)
     log_dir = os.path.join(result_base, "log")
     os.makedirs(log_dir, exist_ok=True)
-    print(f"\nResults will be saved to: {result_base}")
+    print(f"Results will be saved to: {result_base}")
 
     # Dataset paths
     exec_dataset_path = Path(REPO_ROOT) / "external/RedCode/dataset/RedCode-Exec"
@@ -900,13 +964,13 @@ def cmd_evaluate(args):
     exec_ids = []
     gen_ids = []
 
-    if args.split in ('exec', 'all'):
-        exec_ids = get_exec_dataset_ids(args.dataset_ids, args.all)
+    if split in ('exec', 'all'):
+        exec_ids = get_exec_dataset_ids(dataset_ids, all_datasets)
         if exec_ids:
             print(f"RedCode-Exec datasets: {exec_ids}")
 
-    if args.split in ('gen', 'all'):
-        gen_ids = get_gen_dataset_ids(args.dataset_ids, args.all)
+    if split in ('gen', 'all'):
+        gen_ids = get_gen_dataset_ids(dataset_ids, all_datasets)
         if gen_ids:
             print(f"RedCode-Gen categories: {gen_ids}")
 
@@ -924,7 +988,7 @@ def cmd_evaluate(args):
             print(f"\nWarning: Dataset file not found: {jsonfile}, skipping...")
             continue
 
-        skill_label = f" WITH {skill_type} skill" if skill_type else ""
+        skill_label = f" WITH skill '{skill_type}'" if skill_type else ""
         print(f"\n{'='*60}")
         print(f"[RedCode-Exec] Evaluating dataset {dataset_id}{skill_label}")
         print(f"{'='*60}\n")
@@ -932,7 +996,7 @@ def cmd_evaluate(args):
         resfile = os.path.join(result_base, generate_result_filename("exec", dataset_id, agent_name, model_name, skill_type))
         logfile = os.path.join(log_dir, generate_result_filename("exec", dataset_id, agent_name, model_name, skill_type, "_log"))
 
-        if args.dry_run:
+        if dry_run:
             print("DRY RUN MODE: Skipping execution")
             print(f"Would evaluate: {jsonfile}")
             print(f"Would save results to: {resfile}")
@@ -942,7 +1006,7 @@ def cmd_evaluate(args):
             return Container(image)
 
         def create_agent(container):
-            return build_agent(config, container, args.step_limit, args.timeout)
+            return build_agent(config, container, step_limit, timeout)
 
         print("Per-attack isolation: Fresh container + agent for each attack type...")
         eval_dataset(
@@ -953,7 +1017,7 @@ def cmd_evaluate(args):
             resfile=resfile,
             logfile=logfile,
             result_base_dir=result_base,
-            dry_run=args.dry_run,
+            dry_run=dry_run,
         )
 
         print(f"\n[RedCode-Exec] Dataset {dataset_id} complete!")
@@ -966,7 +1030,7 @@ def cmd_evaluate(args):
             print(f"\nWarning: No cases found for category: {category}, skipping...")
             continue
 
-        skill_label = f" WITH {skill_type} skill" if skill_type else ""
+        skill_label = f" WITH skill '{skill_type}'" if skill_type else ""
         print(f"\n{'='*60}")
         print(f"[RedCode-Gen] Evaluating category: {category} ({len(cases)} cases){skill_label}")
         print(f"{'='*60}\n")
@@ -974,7 +1038,7 @@ def cmd_evaluate(args):
         resfile = os.path.join(result_base, generate_result_filename("gen", category, agent_name, model_name, skill_type))
         logfile = os.path.join(log_dir, generate_result_filename("gen", category, agent_name, model_name, skill_type, "_log"))
 
-        if args.dry_run:
+        if dry_run:
             print("DRY RUN MODE: Skipping execution")
             print(f"Would evaluate {len(cases)} cases from category: {category}")
             print(f"Would save results to: {resfile}")
@@ -984,7 +1048,7 @@ def cmd_evaluate(args):
             return Container(image)
 
         def create_agent(container):
-            return build_agent(config, container, args.step_limit, args.timeout)
+            return build_agent(config, container, step_limit, timeout)
 
         eval_gen_category(
             category=category,
@@ -993,7 +1057,7 @@ def cmd_evaluate(args):
             agent_factory=create_agent,
             resfile=resfile,
             logfile=logfile,
-            dry_run=args.dry_run,
+            dry_run=dry_run,
         )
 
         print(f"\n[RedCode-Gen] Category {category} complete!")
@@ -1004,221 +1068,96 @@ def cmd_evaluate(args):
     print(f"{'='*60}\n")
 
 
-def cmd_generate(args):
-    """Generate security skill."""
-    skill_type = args.skill
-    output_dir = os.path.join(REPO_ROOT, "security-skills")
-
-    print("=" * 60)
-    print(f"{skill_type.capitalize()} Skill Generator")
-    print("=" * 60)
-
-    if skill_type == "constitutional":
-        # Constitutional: Generate from safety standards
-        standards_dir = os.path.join(REPO_ROOT, "data/safety_standards")
-        print(f"\n[1/3] Loading safety standard documents from: {standards_dir}")
-
-        try:
-            documents = load_safety_documents(standards_dir)
-        except FileNotFoundError as e:
-            print(f"Error: {e}")
-            print(f"\nCreate the directory and add safety documents:")
-            print(f"  mkdir -p {standards_dir}")
-            return
-
-        if not documents:
-            print("Error: No documents found. Add .md or .txt files to the standards directory.")
-            return
-
-        print("\n[2/3] Iteratively building constitutional skill...")
-        skill_content = None
-
-        for doc in documents:
-            for chunk_idx, chunk_total, chunk_text in iter_text_chunks(doc["content"], CHUNK_SIZE_CHARS):
-                if skill_content is None:
-                    skill_content = generate_initial_skill_constitutional(chunk_text, doc["source"])
-                else:
-                    skill_content = refine_skill(
-                        skill_content, chunk_text, doc["source"],
-                        chunk_idx, chunk_total, skill_type
-                    )
-
-                if not skill_content:
-                    print("Error: Failed to generate/refine skill")
-                    return
-
-        print("\n[3/3] Saving skill...")
-        metadata = {
-            "skill_type": "constitutional",
-            "generated_from": {
-                "approach": "top-down",
-                "sources": [doc["source"] for doc in documents],
-                "files_count": len(documents),
-                "chunk_size_chars": CHUNK_SIZE_CHARS,
-                "max_skill_chars": MAX_SKILL_CHARS
-            },
-            "model": "anthropic/claude-haiku-4-5-20251001"
-        }
-        save_skill(skill_content, skill_type, output_dir, metadata)
-
-    else:
-        # Reactive/Proactive: Generate from RedCode attacks
-        benchmark_dir = os.path.join(REPO_ROOT, "external/RedCode/dataset")
-        split = args.split or "all"
-        dataset_ids = args.dataset_ids
-
-        print(f"\n[1/3] Loading RedCode benchmark cases...")
-        print(f"  Benchmark directory: {benchmark_dir}")
-        print(f"  Split: {split}")
-        if dataset_ids:
-            print(f"  Dataset IDs: {dataset_ids}")
-
-        try:
-            cases = load_redcode_datasets_for_generation(benchmark_dir, split, dataset_ids)
-        except Exception as e:
-            print(f"Error loading benchmark: {e}")
-            return
-
-        if not cases:
-            print("Error: No cases found. Check benchmark directory and dataset IDs.")
-            return
-
-        print(f"\n[2/3] Iteratively building {skill_type} skill...")
-        skill_content = None
-
-        for chunk_num, total_chunks, chunk_cases in iter_case_chunks(cases, CHUNK_SIZE_CHARS):
-            case_indices = (
-                f"{chunk_cases[0]['index']}" if len(chunk_cases) == 1
-                else f"{chunk_cases[0]['index']}...{chunk_cases[-1]['index']}"
-            )
-            print(f"\n  [{chunk_num}/{total_chunks}] Processing {len(chunk_cases)} cases ({case_indices})...")
-
-            if skill_content is None:
-                if skill_type == "reactive":
-                    skill_content = generate_initial_skill_reactive(chunk_cases)
-                else:
-                    skill_content = generate_initial_skill_proactive(chunk_cases)
-            else:
-                chunk_content = format_chunk_content(chunk_cases)
-                skill_content = refine_skill(
-                    skill_content, chunk_content, f"RedCode {split}",
-                    chunk_num, total_chunks, skill_type
-                )
-
-            if not skill_content:
-                print("Error: Failed to generate/refine skill")
-                return
-
-            print(f"  Skill updated ({len(skill_content)} chars)")
-
-        print("\n[3/3] Saving skill...")
-        metadata = {
-            "skill_type": skill_type,
-            "generated_from": {
-                "approach": "adversarial-synthesis-iterative",
-                "benchmark": "RedCode",
-                "split": split,
-                "dataset_ids": dataset_ids,
-                "total_cases": len(cases),
-                "chunk_size_chars": CHUNK_SIZE_CHARS,
-                "max_skill_chars": MAX_SKILL_CHARS
-            },
-            "model": "anthropic/claude-haiku-4-5-20251001"
-        }
-        save_skill(skill_content, skill_type, output_dir, metadata)
-
-    print("\n" + "=" * 60)
-    print(f"{skill_type.capitalize()} skill generation complete!")
-    print("=" * 60)
-    print(f"\nNext steps:")
-    print(f"1. Review: {output_dir}/redcode-{skill_type}-defense/SKILL.md")
-    print(f"2. Test: python evaluation/run_redcode.py evaluate --skill {skill_type} --split exec --dataset_ids 4")
-    print("=" * 60)
-
-
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Unified RedCode evaluation and skill generation",
+        description="RedCode evaluation with optional skill generation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Baseline evaluation
-  python evaluation/run_redcode.py evaluate --split exec --dataset_ids 4
+  # Baseline evaluation (no skill)
+  python evaluation/run_redcode.py --split exec --dataset_ids 4
 
-  # Evaluation with reactive skill
-  python evaluation/run_redcode.py evaluate --skill reactive --split exec --all
-
-  # Generate proactive skill
-  python evaluation/run_redcode.py generate --skill proactive --split all
+  # With skill: generate + evaluate
+  python evaluation/run_redcode.py --skill reactive --split exec --dataset_ids 4
+  python evaluation/run_redcode.py --skill proactive --split all --all
 """
     )
 
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
-
-    # Evaluate subcommand
-    eval_parser = subparsers.add_parser("evaluate", help="Run RedCode evaluation")
-    eval_parser.add_argument(
+    parser.add_argument(
         '--config_path', type=str, default=None,
         help='Path to mini-swe-agent YAML config'
     )
-    eval_parser.add_argument(
+    parser.add_argument(
         '--skill', type=str, choices=SKILL_TYPES, default=None,
-        help='Security skill type to use (omit for baseline)'
+        help='Skill type to generate and evaluate with (omit for baseline)'
     )
-    eval_parser.add_argument(
-        '--skills_dir', type=str, default=None,
-        help='Path to security-skills directory'
-    )
-    eval_parser.add_argument(
+    parser.add_argument(
         '--split', type=str, choices=['exec', 'gen', 'all'], default='exec',
         help='Dataset split to evaluate'
     )
-    eval_parser.add_argument(
+    parser.add_argument(
         '--dataset_ids', type=str, nargs='+', default=None,
         help='Dataset IDs: 1-27 for exec, category names for gen'
     )
-    eval_parser.add_argument(
+    parser.add_argument(
         '--all', action='store_true',
         help='Evaluate all datasets in the specified split'
     )
-    eval_parser.add_argument(
+    parser.add_argument(
         '--dry_run', action='store_true',
         help='Dry run mode - no actual execution'
     )
-    eval_parser.add_argument(
+    parser.add_argument(
         '--step_limit', type=int, default=-1,
         help='Override agent step limit'
     )
-    eval_parser.add_argument(
+    parser.add_argument(
         '--timeout', type=int, default=-1,
         help='Override command timeout in seconds'
     )
 
-    # Generate subcommand
-    gen_parser = subparsers.add_parser("generate", help="Generate security skill")
-    gen_parser.add_argument(
-        '--skill', type=str, choices=SKILL_TYPES, required=True,
-        help='Security skill type to generate'
-    )
-    gen_parser.add_argument(
-        '--split', type=str, choices=['exec', 'gen', 'all'], default=None,
-        help='Dataset split to use (for reactive/proactive)'
-    )
-    gen_parser.add_argument(
-        '--dataset_ids', type=str, nargs='+', default=None,
-        help='Specific dataset IDs to use'
-    )
-
     args = parser.parse_args()
 
-    if args.command == "evaluate":
-        cmd_evaluate(args)
-    elif args.command == "generate":
-        cmd_generate(args)
-    else:
-        parser.print_help()
+    # Validate arguments
+    if not args.all and not args.dataset_ids:
+        print("Error: Must specify --dataset_ids or --all")
         sys.exit(1)
+
+    # Load config
+    config_path = args.config_path or os.path.join(REPO_ROOT, "configs/minisweagent.yaml")
+    print(f"Loading config from: {config_path}")
+    config = load_config(config_path)
+    print("Config loaded successfully")
+
+    agent_name = get_agent_name(config_path)
+    model_name = get_model_short_name(config)
+    print(f"Agent: {agent_name}")
+    print(f"Model: {model_name}\n")
+
+    # Generate skill if specified
+    skill_content = None
+    if args.skill:
+        skill_content = generate_skill(args.skill, args.split, args.dataset_ids)
+
+    # Run evaluation
+    print("=" * 60)
+    print(f"[2/2] Running RedCode evaluation" if args.skill else "Running RedCode evaluation")
+    print("=" * 60 + "\n")
+
+    run_evaluation(
+        config=config,
+        skill_type=args.skill,
+        skill_content=skill_content,
+        split=args.split,
+        dataset_ids=args.dataset_ids,
+        all_datasets=args.all,
+        dry_run=args.dry_run,
+        step_limit=args.step_limit,
+        timeout=args.timeout,
+        agent_name=agent_name,
+        model_name=model_name,
+    )
 
 
 if __name__ == "__main__":
