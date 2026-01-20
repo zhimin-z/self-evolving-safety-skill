@@ -1,417 +1,468 @@
 #!/usr/bin/env python3
 """
-Comprehensive attack results analysis tool.
-Combines comparison, detailed analysis, and visualization.
+Compare baseline vs with-skills evaluation results.
+
+Calculates ASR reduction and identifies effectiveness of different skill types.
 
 Usage:
-    # Quick summary comparison
-    python analysis/analyze_attacks.py --summary
-    
-    # Detailed index-by-index comparison
-    python analysis/analyze_attacks.py --detailed
-    
-    # Quick visualization
-    python analysis/analyze_attacks.py --viz
-    
-    # All analysis types
-    python analysis/analyze_attacks.py --all
+    # Summary comparison
+    python analysis/compare_baseline_vs_skills.py
+
+    # Detailed per-dataset analysis
+    python analysis/compare_baseline_vs_skills.py --detailed
+
+    # Visualization
+    python analysis/compare_baseline_vs_skills.py --viz
+
+    # All analysis
+    python analysis/compare_baseline_vs_skills.py --all
+
+    # Specify custom directories
+    python analysis/compare_baseline_vs_skills.py --baseline results/baseline --skills results/with_skills
 """
 
 import argparse
 import json
 import os
 from collections import defaultdict
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 
 # ============================================================================
 # Data Loading Functions
 # ============================================================================
 
-def load_baseline_results(results_dir):
-    """Load baseline results from individual JSON files"""
-    baseline_results = []
-    json_files = sorted([f for f in os.listdir(results_dir) if f.endswith('.json')])
-    
-    for json_file in json_files:
-        file_path = os.path.join(results_dir, json_file)
-        with open(file_path, 'r') as f:
-            data = json.load(f)
+def load_results(results_dir: str) -> List[Dict]:
+    """Load all result JSON files from a directory.
+
+    Handles the new result format with:
+    - Score Distribution: {0: N, 1: N, 3: N}
+    - Refusal Rate (score=0)
+    - Attack Success Rate (score=3)
+    - Per-Case Results or Results list
+    """
+    results = []
+    results_path = Path(results_dir)
+
+    if not results_path.exists():
+        return results
+
+    for json_file in sorted(results_path.glob("*.json")):
+        # Skip non-result files
+        if "comparison" in json_file.name or "log" in json_file.name:
+            continue
+
+        try:
+            with open(json_file) as f:
+                data = json.load(f)
+
+            # Handle both single result and list of results
             if isinstance(data, list):
-                baseline_results.extend(data)
+                for item in data:
+                    item["_source_file"] = json_file.name
+                    results.append(item)
             else:
-                baseline_results.append(data)
-    
-    return baseline_results
+                data["_source_file"] = json_file.name
+                results.append(data)
+
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"  Warning: Could not load {json_file}: {e}")
+
+    return results
 
 
-def load_evolved_results(results_dir):
-    """Load evolved results from either consolidated file (old) or separate files (new)"""
-    evolved_agent_dir = os.path.join(results_dir, 'astropy__astropy-13977')
-    
-    # Check if we have the old consolidated format
-    old_consolidated = os.path.join(evolved_agent_dir, '2025-12-08_02:24:19.398306.json')
-    if os.path.exists(old_consolidated):
-        # Old format: single consolidated file
-        with open(old_consolidated, 'r') as f:
-            return json.load(f)
-    
-    # New format: separate files like baseline
-    evolved_results = []
-    json_files = sorted([f for f in os.listdir(evolved_agent_dir) if f.endswith('.json')])
-    
-    for json_file in json_files:
-        file_path = os.path.join(evolved_agent_dir, json_file)
-        with open(file_path, 'r') as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                evolved_results.extend(data)
-            else:
-                evolved_results.append(data)
-    
-    return evolved_results
+def extract_scores_from_result(result: Dict) -> Tuple[int, int, int, int]:
+    """Extract score counts from a result entry.
+
+    Returns: (total, score_0, score_1, score_3)
+    """
+    # Try new format first: Score Distribution
+    score_dist = result.get("Score Distribution", {})
+    if score_dist:
+        # Convert string keys to int if needed
+        score_0 = score_dist.get(0, score_dist.get("0", 0))
+        score_1 = score_dist.get(1, score_dist.get("1", 0))
+        score_3 = score_dist.get(3, score_dist.get("3", 0))
+        total = score_0 + score_1 + score_3
+        return total, score_0, score_1, score_3
+
+    # Try extracting from Per-Case Results or Results
+    per_case = result.get("Per-Case Results", result.get("Results", []))
+    if per_case:
+        scores = [r.get("score", 1) for r in per_case]
+        score_0 = scores.count(0)
+        score_1 = scores.count(1)
+        score_3 = scores.count(3)
+        total = len(scores)
+        return total, score_0, score_1, score_3
+
+    # Fallback: try old format with Final Result
+    final_result = result.get("Final Result", {})
+    if final_result:
+        total = 0
+        score_0 = 0
+        score_1 = 0
+        score_3 = 0
+        for attack_type, attack_scores in final_result.items():
+            if isinstance(attack_scores, dict):
+                score_0 += attack_scores.get("0", attack_scores.get(0, 0))
+                score_1 += attack_scores.get("1", attack_scores.get(1, 0))
+                score_3 += attack_scores.get("3", attack_scores.get(3, 0))
+                total += sum(attack_scores.values())
+        return total, score_0, score_1, score_3
+
+    return 0, 0, 0, 0
 
 
 # ============================================================================
 # Analysis Functions
 # ============================================================================
 
-def compute_attack_scores(result_data):
-    """Compute attack success scores from a result entry"""
-    final_result = result_data['Final Result']
-    
-    scores = {}
-    for attack_type in ['Code', 'Code w/ jb', 'Summary', 'Details']:
-        if attack_type in final_result:
-            attack_results = final_result[attack_type]
-            total = sum(attack_results.values())
-            success = attack_results.get('3', 0)
-            partial = attack_results.get('1', 0)
-            fail = attack_results.get('0', 0)
-            
-            scores[attack_type] = {
-                'total': total,
-                'success': success,
-                'partial': partial,
-                'fail': fail,
-                'success_rate': success / total if total > 0 else 0,
-                'anything_rate': (success + partial) / total if total > 0 else 0
-            }
-    
-    return scores
+def aggregate_results(results: List[Dict]) -> Dict:
+    """Aggregate results to compute overall statistics.
 
+    Returns dict with:
+    - total: total number of cases
+    - score_0: refusals
+    - score_1: execution failures
+    - score_3: attack successes
+    - refusal_rate: score_0 / total
+    - failure_rate: score_1 / total
+    - attack_success_rate: score_3 / total
+    - by_skill: breakdown by skill type
+    - by_dataset: breakdown by dataset
+    - by_split: breakdown by split (exec/gen)
+    """
+    totals = {"total": 0, "score_0": 0, "score_1": 0, "score_3": 0}
+    by_skill = defaultdict(lambda: {"total": 0, "score_0": 0, "score_1": 0, "score_3": 0})
+    by_dataset = defaultdict(lambda: {"total": 0, "score_0": 0, "score_1": 0, "score_3": 0})
+    by_split = defaultdict(lambda: {"total": 0, "score_0": 0, "score_1": 0, "score_3": 0})
 
-def aggregate_results(all_results):
-    """Aggregate all results to compute overall statistics"""
-    aggregated = defaultdict(lambda: {
-        'total': 0,
-        'success': 0,
-        'partial': 0,
-        'fail': 0
-    })
-    
-    for result in all_results:
-        scores = compute_attack_scores(result)
-        for attack_type, metrics in scores.items():
-            aggregated[attack_type]['total'] += metrics['total']
-            aggregated[attack_type]['success'] += metrics['success']
-            aggregated[attack_type]['partial'] += metrics['partial']
-            aggregated[attack_type]['fail'] += metrics['fail']
-    
-    # Compute rates
-    for attack_type in aggregated:
-        total = aggregated[attack_type]['total']
-        if total > 0:
-            aggregated[attack_type]['success_rate'] = aggregated[attack_type]['success'] / total
-            aggregated[attack_type]['anything_rate'] = (aggregated[attack_type]['success'] + aggregated[attack_type]['partial']) / total
-    
-    return aggregated
+    for result in results:
+        total, score_0, score_1, score_3 = extract_scores_from_result(result)
+
+        if total == 0:
+            continue
+
+        # Overall totals
+        totals["total"] += total
+        totals["score_0"] += score_0
+        totals["score_1"] += score_1
+        totals["score_3"] += score_3
+
+        # By skill type
+        skill = result.get("Skill", "baseline") or "baseline"
+        by_skill[skill]["total"] += total
+        by_skill[skill]["score_0"] += score_0
+        by_skill[skill]["score_1"] += score_1
+        by_skill[skill]["score_3"] += score_3
+
+        # By dataset
+        datasets = result.get("Datasets", [])
+        if isinstance(datasets, list):
+            for ds in datasets:
+                by_dataset[str(ds)]["total"] += total // len(datasets)
+                by_dataset[str(ds)]["score_0"] += score_0 // len(datasets)
+                by_dataset[str(ds)]["score_1"] += score_1 // len(datasets)
+                by_dataset[str(ds)]["score_3"] += score_3 // len(datasets)
+
+        # By split
+        split = result.get("Split", "exec")
+        by_split[split]["total"] += total
+        by_split[split]["score_0"] += score_0
+        by_split[split]["score_1"] += score_1
+        by_split[split]["score_3"] += score_3
+
+    # Calculate rates
+    def calc_rates(d):
+        if d["total"] > 0:
+            d["refusal_rate"] = d["score_0"] / d["total"]
+            d["failure_rate"] = d["score_1"] / d["total"]
+            d["attack_success_rate"] = d["score_3"] / d["total"]
+        else:
+            d["refusal_rate"] = 0
+            d["failure_rate"] = 0
+            d["attack_success_rate"] = 0
+        return d
+
+    totals = calc_rates(totals)
+
+    return {
+        "overall": totals,
+        "by_skill": {k: calc_rates(dict(v)) for k, v in by_skill.items()},
+        "by_dataset": {k: calc_rates(dict(v)) for k, v in by_dataset.items()},
+        "by_split": {k: calc_rates(dict(v)) for k, v in by_split.items()},
+        "n_files": len(results),
+    }
 
 
 # ============================================================================
 # Summary Comparison
 # ============================================================================
 
-def print_summary_comparison(baseline_results, evolved_results):
-    """Print overall summary comparison"""
+def print_summary_comparison(baseline_agg: Dict, skills_agg: Dict):
+    """Print overall summary comparison."""
     print("=" * 80)
-    print("ATTACK RESULTS COMPARISON: Mini-SWE-Agent vs Evolved Agent")
+    print(" " * 15 + "BASELINE vs WITH-SKILLS COMPARISON")
     print("=" * 80)
     print()
-    
-    baseline_agg = aggregate_results(baseline_results)
-    evolved_agg = aggregate_results(evolved_results)
-    
-    print(f"Number of test sets:")
-    print(f"  Baseline: {len(baseline_results)} test sets")
-    print(f"  Evolved:  {len(evolved_results)} test sets")
+
+    baseline = baseline_agg["overall"]
+    skills = skills_agg["overall"]
+
+    print(f"{'Metric':<30} {'Baseline':<20} {'With Skills':<20} {'Change':<15}")
+    print("-" * 85)
+
+    # Total cases
+    print(f"{'Total Cases':<30} {baseline['total']:<20} {skills['total']:<20} {skills['total'] - baseline['total']:+d}")
+
+    # Refusals (score 0) - higher is better for safety
+    b_rr = baseline["refusal_rate"] * 100
+    s_rr = skills["refusal_rate"] * 100
+    delta_rr = s_rr - b_rr
+    symbol = "+" if delta_rr > 0 else ""
+    print(f"{'Refusals (score=0)':<30} {baseline['score_0']:>4} ({b_rr:5.1f}%)      {skills['score_0']:>4} ({s_rr:5.1f}%)      {symbol}{delta_rr:5.1f}%")
+
+    # Execution failures (score 1)
+    b_fr = baseline["failure_rate"] * 100
+    s_fr = skills["failure_rate"] * 100
+    delta_fr = s_fr - b_fr
+    symbol = "+" if delta_fr > 0 else ""
+    print(f"{'Exec Failures (score=1)':<30} {baseline['score_1']:>4} ({b_fr:5.1f}%)      {skills['score_1']:>4} ({s_fr:5.1f}%)      {symbol}{delta_fr:5.1f}%")
+
+    # Attack successes (score 3) - lower is better for safety
+    b_asr = baseline["attack_success_rate"] * 100
+    s_asr = skills["attack_success_rate"] * 100
+    delta_asr = s_asr - b_asr
+    symbol = "+" if delta_asr > 0 else ""
+    print(f"{'Attack Success (score=3)':<30} {baseline['score_3']:>4} ({b_asr:5.1f}%)      {skills['score_3']:>4} ({s_asr:5.1f}%)      {symbol}{delta_asr:5.1f}%")
+
+    print("-" * 85)
+
+    # Key metrics
     print()
-    
-    attack_types = ['Code', 'Code w/ jb', 'Summary', 'Details']
-    
-    for attack_type in attack_types:
-        print(f"\n{'=' * 80}")
-        print(f"Attack Type: {attack_type}")
-        print('=' * 80)
-        
-        baseline = baseline_agg[attack_type]
-        evolved = evolved_agg[attack_type]
-        
-        print(f"\n{'Metric':<25} {'Baseline':<20} {'Evolved':<20} {'Δ (Evolved - Baseline)':<20}")
-        print('-' * 85)
-        
-        print(f"{'Total Attacks':<25} {baseline['total']:<20} {evolved['total']:<20} {evolved['total'] - baseline['total']:<20}")
-        print(f"{'Successful (3)':<25} {baseline['success']:<20} {evolved['success']:<20} {evolved['success'] - baseline['success']:<20}")
-        print(f"{'Partial (1)':<25} {baseline['partial']:<20} {evolved['partial']:<20} {evolved['partial'] - baseline['partial']:<20}")
-        print(f"{'Failed (0)':<25} {baseline['fail']:<20} {evolved['fail']:<20} {evolved['fail'] - baseline['fail']:<20}")
-        
-        baseline_sr = baseline.get('success_rate', 0) * 100
-        evolved_sr = evolved.get('success_rate', 0) * 100
-        print(f"{'Success Rate':<25} {baseline_sr:<19.1f}% {evolved_sr:<19.1f}% {evolved_sr - baseline_sr:<19.1f}%")
-        
-        baseline_ar = baseline.get('anything_rate', 0) * 100
-        evolved_ar = evolved.get('anything_rate', 0) * 100
-        print(f"{'Success+Partial Rate':<25} {baseline_ar:<19.1f}% {evolved_ar:<19.1f}% {evolved_ar - baseline_ar:<19.1f}%")
-    
-    # Summary
-    print(f"\n\n{'=' * 80}")
-    print("SUMMARY")
-    print('=' * 80)
-    
-    baseline_avg_sr = sum(baseline_agg[at].get('success_rate', 0) for at in attack_types) / len(attack_types) * 100
-    evolved_avg_sr = sum(evolved_agg[at].get('success_rate', 0) for at in attack_types) / len(attack_types) * 100
-    
-    print(f"\nAverage Success Rate (across all attack types):")
-    print(f"  Baseline: {baseline_avg_sr:.1f}%")
-    print(f"  Evolved:  {evolved_avg_sr:.1f}%")
-    print(f"  Improvement: {evolved_avg_sr - baseline_avg_sr:+.1f}%")
-    
-    baseline_total_success = sum(baseline_agg[at]['success'] for at in attack_types)
-    evolved_total_success = sum(evolved_agg[at]['success'] for at in attack_types)
-    baseline_total_attempts = sum(baseline_agg[at]['total'] for at in attack_types)
-    evolved_total_attempts = sum(evolved_agg[at]['total'] for at in attack_types)
-    
-    print(f"\nTotal Successful Attacks:")
-    print(f"  Baseline: {baseline_total_success}/{baseline_total_attempts} ({baseline_total_success/baseline_total_attempts*100:.1f}%)")
-    print(f"  Evolved:  {evolved_total_success}/{evolved_total_attempts} ({evolved_total_success/evolved_total_attempts*100:.1f}%)")
-    print(f"  Difference: {evolved_total_success - baseline_total_success:+d} attacks")
+    print("KEY METRICS:")
+    print("-" * 85)
+
+    asr_reduction = b_asr - s_asr
+    if b_asr > 0:
+        rel_reduction = (asr_reduction / b_asr) * 100
+    else:
+        rel_reduction = 0
+
+    print(f"  Attack Success Rate (ASR):")
+    print(f"    Baseline:    {b_asr:6.2f}%")
+    print(f"    With Skills: {s_asr:6.2f}%")
+    if asr_reduction > 0:
+        print(f"    Reduction:   {asr_reduction:6.2f}% (↓{rel_reduction:.1f}% relative)")
+    elif asr_reduction < 0:
+        print(f"    INCREASE:    {-asr_reduction:6.2f}% (↑{-rel_reduction:.1f}% relative)")
+    else:
+        print(f"    No change")
+
+    print()
+    rr_increase = s_rr - b_rr
+    print(f"  Refusal Rate (RR):")
+    print(f"    Baseline:    {b_rr:6.2f}%")
+    print(f"    With Skills: {s_rr:6.2f}%")
+    if rr_increase > 0:
+        print(f"    Increase:    {rr_increase:6.2f}% (more refusals = safer)")
+    elif rr_increase < 0:
+        print(f"    Decrease:    {-rr_increase:6.2f}%")
+    else:
+        print(f"    No change")
+
+    print("=" * 80)
+
+
+def print_analysis(baseline_agg: Dict, skills_agg: Dict):
+    """Print analysis and conclusions."""
+    print()
+    print("ANALYSIS:")
+    print("-" * 80)
+
+    baseline = baseline_agg["overall"]
+    skills = skills_agg["overall"]
+
+    b_asr = baseline["attack_success_rate"] * 100
+    s_asr = skills["attack_success_rate"] * 100
+    asr_reduction = b_asr - s_asr
+
+    b_rr = baseline["refusal_rate"] * 100
+    s_rr = skills["refusal_rate"] * 100
+    rr_increase = s_rr - b_rr
+
+    if asr_reduction > 5:
+        print(f"  [STRONG] Security skill SIGNIFICANTLY reduced ASR by {asr_reduction:.1f}%")
+    elif asr_reduction > 0:
+        print(f"  [POSITIVE] Security skill reduced ASR by {asr_reduction:.1f}%")
+    elif asr_reduction < -5:
+        print(f"  [WARNING] Security skill INCREASED ASR by {-asr_reduction:.1f}%!")
+    elif asr_reduction < 0:
+        print(f"  [CONCERN] Security skill slightly increased ASR by {-asr_reduction:.1f}%")
+    else:
+        print(f"  [NEUTRAL] No change in ASR")
+
+    if rr_increase > 5:
+        print(f"  [STRONG] Refusal rate increased by {rr_increase:.1f}% (better safety awareness)")
+    elif rr_increase > 0:
+        print(f"  [POSITIVE] Refusal rate increased by {rr_increase:.1f}%")
+
+    # Check skill-specific results
+    if skills_agg.get("by_skill"):
+        print()
+        print("  By Skill Type:")
+        for skill, data in sorted(skills_agg["by_skill"].items()):
+            if skill == "baseline":
+                continue
+            asr = data["attack_success_rate"] * 100
+            rr = data["refusal_rate"] * 100
+            print(f"    {skill}: ASR={asr:.1f}%, RR={rr:.1f}% (n={data['total']})")
+
+    print("=" * 80)
 
 
 # ============================================================================
-# Detailed Comparison
+# Detailed Analysis
 # ============================================================================
 
-def print_detailed_comparison(baseline_results, evolved_results):
-    """Print detailed index-by-index comparison"""
-    print("=" * 100)
-    print("INDEX-BY-INDEX DETAILED COMPARISON")
-    print("=" * 100)
+def print_detailed_comparison(baseline_agg: Dict, skills_agg: Dict):
+    """Print detailed breakdown by dataset and split."""
     print()
-    
-    baseline_sorted = sorted(baseline_results, key=lambda x: x['Index'])
-    evolved_sorted = sorted(evolved_results, key=lambda x: x['Index'])
-    
-    print(f"{'Index':<8} {'Attack Type':<15} {'Baseline Success':<18} {'Evolved Success':<18} {'Δ':<10}")
-    print('-' * 100)
-    
-    better_count = 0
-    worse_count = 0
-    same_count = 0
-    
-    for baseline, evolved in zip(baseline_sorted, evolved_sorted):
-        idx = baseline['Index']
-        
-        for attack_type in ['Code', 'Code w/ jb', 'Summary', 'Details']:
-            baseline_res = baseline['Final Result'].get(attack_type, {})
-            evolved_res = evolved['Final Result'].get(attack_type, {})
-            
-            baseline_success = baseline_res.get('3', 0)
-            evolved_success = evolved_res.get('3', 0)
-            
-            delta = evolved_success - baseline_success
-            
-            if delta > 0:
-                delta_str = f"+{delta}"
-                better_count += 1
-            elif delta < 0:
-                delta_str = f"{delta}"
-                worse_count += 1
-            else:
-                delta_str = "0"
-                same_count += 1
-            
-            baseline_total = sum(baseline_res.values())
-            evolved_total = sum(evolved_res.values())
-            
-            baseline_str = f"{baseline_success}/{baseline_total}"
-            evolved_str = f"{evolved_success}/{evolved_total}"
-            
-            print(f"{idx:<8} {attack_type:<15} {baseline_str:<18} {evolved_str:<18} {delta_str:<10}")
-    
+    print("=" * 80)
+    print("DETAILED BREAKDOWN")
+    print("=" * 80)
+
+    # By Split
     print()
-    print(f"Summary across all indices and attack types:")
-    print(f"  Better (evolved > baseline): {better_count}")
-    print(f"  Worse (evolved < baseline):  {worse_count}")
-    print(f"  Same (evolved = baseline):   {same_count}")
+    print("By Split (exec/gen):")
+    print("-" * 80)
+    print(f"{'Split':<10} {'Baseline ASR':<15} {'Skills ASR':<15} {'Delta':<10} {'Baseline RR':<15} {'Skills RR':<15}")
+    print("-" * 80)
 
+    for split in ["exec", "gen"]:
+        b_data = baseline_agg["by_split"].get(split, {"attack_success_rate": 0, "refusal_rate": 0, "total": 0})
+        s_data = skills_agg["by_split"].get(split, {"attack_success_rate": 0, "refusal_rate": 0, "total": 0})
 
-def print_worst_performers(baseline_results, evolved_results):
-    """Find indices where evolved performed significantly worse"""
-    print("\n" + "=" * 100)
-    print("INDICES WHERE EVOLVED PERFORMED SIGNIFICANTLY WORSE (Δ < -5)")
-    print("=" * 100)
-    print()
-    
-    baseline_sorted = sorted(baseline_results, key=lambda x: x['Index'])
-    evolved_sorted = sorted(evolved_results, key=lambda x: x['Index'])
-    
-    worst_performers = []
-    
-    for baseline, evolved in zip(baseline_sorted, evolved_sorted):
-        idx = baseline['Index']
-        
-        total_delta = 0
-        for attack_type in ['Code', 'Code w/ jb', 'Summary', 'Details']:
-            baseline_res = baseline['Final Result'].get(attack_type, {})
-            evolved_res = evolved['Final Result'].get(attack_type, {})
-            
-            baseline_success = baseline_res.get('3', 0)
-            evolved_success = evolved_res.get('3', 0)
-            
-            total_delta += (evolved_success - baseline_success)
-        
-        if total_delta < -5:
-            worst_performers.append((idx, total_delta, baseline, evolved))
-    
-    worst_performers.sort(key=lambda x: x[1])
-    
-    if not worst_performers:
-        print("No indices with significant performance degradation.")
-        return
-    
-    for idx, delta, baseline, evolved in worst_performers:
-        print(f"Index {idx}: Total delta = {delta}")
-        print(f"  Baseline duration: {float(baseline.get('Duration', 0)):.1f}s")
-        print(f"  Evolved duration:  {float(evolved.get('Duration', 0)):.1f}s")
-        print()
-        
-        for attack_type in ['Code', 'Code w/ jb', 'Summary', 'Details']:
-            baseline_res = baseline['Final Result'].get(attack_type, {})
-            evolved_res = evolved['Final Result'].get(attack_type, {})
-            
-            baseline_success = baseline_res.get('3', 0)
-            evolved_success = evolved_res.get('3', 0)
-            
-            delta_val = evolved_success - baseline_success
-            
-            baseline_total = sum(baseline_res.values())
-            evolved_total = sum(evolved_res.values())
-            
-            print(f"  {attack_type:15}: Baseline {baseline_success}/{baseline_total}, Evolved {evolved_success}/{evolved_total}, Δ={delta_val:+d}")
-        print()
+        if b_data["total"] == 0 and s_data["total"] == 0:
+            continue
 
+        b_asr = b_data["attack_success_rate"] * 100
+        s_asr = s_data["attack_success_rate"] * 100
+        b_rr = b_data["refusal_rate"] * 100
+        s_rr = s_data["refusal_rate"] * 100
 
-def print_best_performers(baseline_results, evolved_results):
-    """Find indices where evolved performed significantly better"""
-    print("\n" + "=" * 100)
-    print("INDICES WHERE EVOLVED PERFORMED SIGNIFICANTLY BETTER (Δ > +5)")
-    print("=" * 100)
-    print()
-    
-    baseline_sorted = sorted(baseline_results, key=lambda x: x['Index'])
-    evolved_sorted = sorted(evolved_results, key=lambda x: x['Index'])
-    
-    best_performers = []
-    
-    for baseline, evolved in zip(baseline_sorted, evolved_sorted):
-        idx = baseline['Index']
-        
-        total_delta = 0
-        for attack_type in ['Code', 'Code w/ jb', 'Summary', 'Details']:
-            baseline_res = baseline['Final Result'].get(attack_type, {})
-            evolved_res = evolved['Final Result'].get(attack_type, {})
-            
-            baseline_success = baseline_res.get('3', 0)
-            evolved_success = evolved_res.get('3', 0)
-            
-            total_delta += (evolved_success - baseline_success)
-        
-        if total_delta > 5:
-            best_performers.append((idx, total_delta, baseline, evolved))
-    
-    best_performers.sort(key=lambda x: x[1], reverse=True)
-    
-    if not best_performers:
-        print("No indices with significant performance improvement.")
-        return
-    
-    for idx, delta, baseline, evolved in best_performers:
-        print(f"Index {idx}: Total delta = +{delta}")
-        print(f"  Baseline duration: {float(baseline.get('Duration', 0)):.1f}s")
-        print(f"  Evolved duration:  {float(evolved.get('Duration', 0)):.1f}s")
+        delta = s_asr - b_asr
+        print(f"{split:<10} {b_asr:>6.1f}% (n={b_data['total']:<4}) {s_asr:>6.1f}% (n={s_data['total']:<4}) {delta:>+6.1f}%    {b_rr:>6.1f}%         {s_rr:>6.1f}%")
+
+    # By Dataset
+    all_datasets = set(baseline_agg.get("by_dataset", {}).keys()) | set(skills_agg.get("by_dataset", {}).keys())
+    if all_datasets:
         print()
-        
-        for attack_type in ['Code', 'Code w/ jb', 'Summary', 'Details']:
-            baseline_res = baseline['Final Result'].get(attack_type, {})
-            evolved_res = evolved['Final Result'].get(attack_type, {})
-            
-            baseline_success = baseline_res.get('3', 0)
-            evolved_success = evolved_res.get('3', 0)
-            
-            delta_val = evolved_success - baseline_success
-            
-            baseline_total = sum(baseline_res.values())
-            evolved_total = sum(evolved_res.values())
-            
-            print(f"  {attack_type:15}: Baseline {baseline_success}/{baseline_total}, Evolved {evolved_success}/{evolved_total}, Δ={delta_val:+d}")
-        print()
+        print("By Dataset:")
+        print("-" * 80)
+        print(f"{'Dataset':<10} {'Baseline ASR':<15} {'Skills ASR':<15} {'Delta':<10}")
+        print("-" * 80)
+
+        for ds in sorted(all_datasets, key=lambda x: int(x) if x.isdigit() else 999):
+            b_data = baseline_agg["by_dataset"].get(ds, {"attack_success_rate": 0, "total": 0})
+            s_data = skills_agg["by_dataset"].get(ds, {"attack_success_rate": 0, "total": 0})
+
+            if b_data["total"] == 0 and s_data["total"] == 0:
+                continue
+
+            b_asr = b_data["attack_success_rate"] * 100
+            s_asr = s_data["attack_success_rate"] * 100
+            delta = s_asr - b_asr
+
+            print(f"{ds:<10} {b_asr:>6.1f}% (n={b_data['total']:<4}) {s_asr:>6.1f}% (n={s_data['total']:<4}) {delta:>+6.1f}%")
+
+    print("=" * 80)
 
 
 # ============================================================================
 # Visualization
 # ============================================================================
 
-def print_visualization(baseline_results, evolved_results):
-    """Print quick text-based visualization"""
-    baseline_agg = aggregate_results(baseline_results)
-    evolved_agg = aggregate_results(evolved_results)
-    
-    print("\n" + "=" * 80)
-    print("QUICK VISUALIZATION")
+def print_visualization(baseline_agg: Dict, skills_agg: Dict):
+    """Print text-based visualization."""
+    print()
+    print("=" * 80)
+    print("VISUALIZATION")
     print("=" * 80)
     print()
-    print("Attack Success Rates:")
+
+    baseline = baseline_agg["overall"]
+    skills = skills_agg["overall"]
+
+    # Attack Success Rate comparison
+    print("Attack Success Rate (lower = safer):")
     print()
-    
-    attack_types = ['Code', 'Code w/ jb', 'Summary', 'Details']
-    
-    for attack_type in attack_types:
-        baseline_rate = baseline_agg[attack_type]['success_rate'] * 100
-        evolved_rate = evolved_agg[attack_type]['success_rate'] * 100
-        delta = evolved_rate - baseline_rate
-        
-        baseline_bar = '█' * int(baseline_rate / 2)
-        evolved_bar = '█' * int(evolved_rate / 2)
-        
-        delta_symbol = '↑' if delta > 0 else '↓' if delta < 0 else '='
-        
-        print(f"{attack_type:15}")
-        print(f"  Baseline: {baseline_bar:<50} {baseline_rate:5.1f}%")
-        print(f"  Evolved:  {evolved_bar:<50} {evolved_rate:5.1f}% {delta_symbol} {abs(delta):.1f}%")
+
+    b_asr = baseline["attack_success_rate"] * 100
+    s_asr = skills["attack_success_rate"] * 100
+
+    b_bar = "█" * int(b_asr / 2)
+    s_bar = "█" * int(s_asr / 2)
+
+    delta = s_asr - b_asr
+    delta_symbol = "↑" if delta > 0 else "↓" if delta < 0 else "="
+
+    print(f"  Baseline:    {b_bar:<50} {b_asr:5.1f}%")
+    print(f"  With Skills: {s_bar:<50} {s_asr:5.1f}% {delta_symbol} {abs(delta):.1f}%")
+
+    print()
+
+    # Refusal Rate comparison
+    print("Refusal Rate (higher = safer):")
+    print()
+
+    b_rr = baseline["refusal_rate"] * 100
+    s_rr = skills["refusal_rate"] * 100
+
+    b_bar = "█" * int(b_rr / 2)
+    s_bar = "█" * int(s_rr / 2)
+
+    delta = s_rr - b_rr
+    delta_symbol = "↑" if delta > 0 else "↓" if delta < 0 else "="
+
+    print(f"  Baseline:    {b_bar:<50} {b_rr:5.1f}%")
+    print(f"  With Skills: {s_bar:<50} {s_rr:5.1f}% {delta_symbol} {abs(delta):.1f}%")
+
+    print()
+
+    # Score distribution pie-style
+    print("Score Distribution:")
+    print()
+
+    for label, data in [("Baseline", baseline), ("With Skills", skills)]:
+        total = data["total"]
+        if total == 0:
+            continue
+
+        s0 = data["score_0"]
+        s1 = data["score_1"]
+        s3 = data["score_3"]
+
+        s0_pct = s0 / total * 100
+        s1_pct = s1 / total * 100
+        s3_pct = s3 / total * 100
+
+        # Create a simple bar representation
+        bar_len = 50
+        s0_len = int(s0_pct / 100 * bar_len)
+        s3_len = int(s3_pct / 100 * bar_len)
+        s1_len = bar_len - s0_len - s3_len
+
+        bar = "░" * s0_len + "▒" * s1_len + "█" * s3_len
+
+        print(f"  {label}:")
+        print(f"    [{bar}]")
+        print(f"    ░ Refused (0): {s0_pct:5.1f}%  ▒ Failed (1): {s1_pct:5.1f}%  █ Success (3): {s3_pct:5.1f}%")
         print()
-    
-    print()
-    print("Overall Average Success Rate:")
-    baseline_avg = sum(baseline_agg[at]['success_rate'] for at in attack_types) / len(attack_types) * 100
-    evolved_avg = sum(evolved_agg[at]['success_rate'] for at in attack_types) / len(attack_types) * 100
-    
-    baseline_bar = '█' * int(baseline_avg / 2)
-    evolved_bar = '█' * int(evolved_avg / 2)
-    
-    delta = evolved_avg - baseline_avg
-    delta_symbol = '↑' if delta > 0 else '↓'
-    
-    print(f"  Baseline: {baseline_bar:<50} {baseline_avg:5.1f}%")
-    print(f"  Evolved:  {evolved_bar:<50} {evolved_avg:5.1f}% {delta_symbol} {abs(delta):.1f}%")
+
+    print("=" * 80)
 
 
 # ============================================================================
@@ -420,40 +471,99 @@ def print_visualization(baseline_results, evolved_results):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Analyze attack results between baseline and evolved agents"
+        description="Compare baseline vs with-skills evaluation results",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python analysis/compare_baseline_vs_skills.py
+  python analysis/compare_baseline_vs_skills.py --detailed --viz
+  python analysis/compare_baseline_vs_skills.py --baseline results/baseline --skills results/with_skills
+"""
     )
-    parser.add_argument('--summary', action='store_true', help='Show summary comparison')
-    parser.add_argument('--detailed', action='store_true', help='Show detailed index-by-index comparison')
-    parser.add_argument('--viz', action='store_true', help='Show quick visualization')
-    parser.add_argument('--all', action='store_true', help='Show all analysis types')
-    
+
+    parser.add_argument("--summary", action="store_true", help="Show summary comparison (default)")
+    parser.add_argument("--detailed", action="store_true", help="Show detailed breakdown")
+    parser.add_argument("--viz", action="store_true", help="Show visualization")
+    parser.add_argument("--all", action="store_true", help="Show all analysis")
+    parser.add_argument("--baseline", type=str, default=None, help="Baseline results directory")
+    parser.add_argument("--skills", type=str, default=None, help="With-skills results directory")
+    parser.add_argument("--output", type=str, default=None, help="Output JSON file for results")
+
     args = parser.parse_args()
-    
-    # If no options specified, default to summary
+
+    # Default to summary if nothing specified
     if not any([args.summary, args.detailed, args.viz, args.all]):
         args.summary = True
-    
-    # Load results
-    baseline_dir = 'results/baseline'
-    evolved_dir = 'results/evolved'
-    
+
+    # Determine directories
+    repo_root = Path(__file__).parent.parent
+    baseline_dir = Path(args.baseline) if args.baseline else repo_root / "results" / "baseline"
+    skills_dir = Path(args.skills) if args.skills else repo_root / "results" / "with_skills"
+
+    print()
     print("Loading results...")
-    baseline_results = load_baseline_results(baseline_dir)
-    evolved_results = load_evolved_results(evolved_dir)
-    print(f"✓ Loaded {len(baseline_results)} baseline and {len(evolved_results)} evolved results\n")
-    
+    print(f"  Baseline:    {baseline_dir}")
+    print(f"  With Skills: {skills_dir}")
+
+    # Load results
+    baseline_results = load_results(str(baseline_dir))
+    skills_results = load_results(str(skills_dir))
+
+    if not baseline_results:
+        print(f"\n  Warning: No baseline results found at {baseline_dir}")
+        print(f"  Run: python evaluation/run_redcode_separated.py --split exec --dataset_ids 4")
+
+    if not skills_results:
+        print(f"\n  Warning: No with-skills results found at {skills_dir}")
+        print(f"  Run: python evaluation/run_redcode_separated.py --skill reactive --split exec --dataset_ids 4")
+
+    if not baseline_results and not skills_results:
+        print("\n  No results to compare. Exiting.")
+        return
+
+    print(f"\n  Loaded {len(baseline_results)} baseline file(s)")
+    print(f"  Loaded {len(skills_results)} with-skills file(s)")
+    print()
+
+    # Aggregate results
+    baseline_agg = aggregate_results(baseline_results)
+    skills_agg = aggregate_results(skills_results)
+
     # Run requested analyses
     if args.all or args.summary:
-        print_summary_comparison(baseline_results, evolved_results)
-    
-    if args.all or args.viz:
-        print_visualization(baseline_results, evolved_results)
-    
+        print_summary_comparison(baseline_agg, skills_agg)
+        print_analysis(baseline_agg, skills_agg)
+
     if args.all or args.detailed:
-        print_detailed_comparison(baseline_results, evolved_results)
-        print_worst_performers(baseline_results, evolved_results)
-        print_best_performers(baseline_results, evolved_results)
+        print_detailed_comparison(baseline_agg, skills_agg)
+
+    if args.all or args.viz:
+        print_visualization(baseline_agg, skills_agg)
+
+    # Save results to JSON
+    output_file = Path(args.output) if args.output else repo_root / "results" / "comparison_results.json"
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    comparison_data = {
+        "baseline": baseline_agg,
+        "with_skills": skills_agg,
+        "comparison": {
+            "asr_reduction": baseline_agg["overall"]["attack_success_rate"] - skills_agg["overall"]["attack_success_rate"],
+            "asr_reduction_pct": (
+                (baseline_agg["overall"]["attack_success_rate"] - skills_agg["overall"]["attack_success_rate"])
+                / baseline_agg["overall"]["attack_success_rate"] * 100
+                if baseline_agg["overall"]["attack_success_rate"] > 0 else 0
+            ),
+            "refusal_rate_increase": skills_agg["overall"]["refusal_rate"] - baseline_agg["overall"]["refusal_rate"],
+        }
+    }
+
+    with open(output_file, "w") as f:
+        json.dump(comparison_data, f, indent=2)
+
+    print(f"\nResults saved to: {output_file}")
+    print()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
