@@ -180,6 +180,7 @@ def run_reactive_proactive_experiment(
                 output_dir=output_dir,
                 dataset_ids=[dataset_id],
                 run_idx=run_idx,
+                model=get_model_full_name(config),
             )
 
             # Inject skill into config
@@ -437,7 +438,7 @@ Examples:
 
     elif args.skill == 'constitutional':
         # Constitutional: single generation from safety standards, then evaluate on all data
-        skill_content = generate_skill(args.skill, args.split, args.dataset_ids)
+        skill_content = generate_skill(args.skill, args.split, args.dataset_ids, model=get_model_full_name(config))
 
         print("=" * 60)
         print("[2/2] Running RedCode evaluation with constitutional skill")

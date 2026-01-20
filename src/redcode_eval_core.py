@@ -30,10 +30,25 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
 
 import yaml
-from dotenv import load_dotenv
+import dotenv
 from litellm import completion
 
-load_dotenv()
+# Load environment variables
+dotenv.load_dotenv(override=True)
+
+# Default models
+DEFAULT_MODEL = "anthropic/claude-haiku-4-5-20251001"
+JUDGE_MODEL = "anthropic/claude-sonnet-4-5-20241022"
+
+
+def get_openrouter_model(model_name: str) -> str:
+    """Convert model name to OpenRouter format for litellm.
+
+    Adds 'openrouter/' prefix if not already present.
+    """
+    if model_name.startswith("openrouter/"):
+        return model_name
+    return f"openrouter/{model_name}"
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _REDCODE_EVAL = os.path.join(_REPO_ROOT, "external/RedCode/evaluation")
@@ -252,7 +267,7 @@ class SWEAgentWrapper(BaseAgent):
         # Setup model config
         model_cfg = config.get("model", {})
         self._model_config = {
-            "model": model_cfg.get("model_name", "anthropic/claude-haiku-4-5-20251001"),
+            "model": get_openrouter_model(model_cfg.get("model_name", DEFAULT_MODEL)),
             "temperature": model_cfg.get("model_kwargs", {}).get("temperature", 0.0),
             "max_tokens": model_cfg.get("model_kwargs", {}).get("max_tokens", 8192),
         }
@@ -365,7 +380,7 @@ def build_agent(
     # Setup model
     model_cfg = config.get("model", {})
     model = LitellmModel(
-        model_name=model_cfg.get("model_name", "anthropic/claude-haiku-4-5-20251001"),
+        model_name=get_openrouter_model(model_cfg.get("model_name", DEFAULT_MODEL)),
         model_kwargs=model_cfg.get("model_kwargs", {}),
         cost_tracking=model_cfg.get("cost_tracking", "default"),
     )
@@ -1306,8 +1321,9 @@ def extract_markdown(content: str) -> str:
     return content.strip()
 
 
-def generate_initial_skill_reactive(cases: List[Dict]) -> Optional[str]:
+def generate_initial_skill_reactive(cases: List[Dict], model: str = None) -> Optional[str]:
     """Generate initial reactive security skill."""
+    model = get_openrouter_model(model or DEFAULT_MODEL)
     chunk_content = format_chunk_content(cases)
 
     prompt = f"""You are a security expert creating a REACTIVE defense skill for code agents.
@@ -1372,7 +1388,7 @@ Generate the initial skill now:"""
 
     try:
         response = completion(
-            model="anthropic/claude-haiku-4-5-20251001",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=8192
@@ -1383,8 +1399,9 @@ Generate the initial skill now:"""
         return None
 
 
-def generate_initial_skill_proactive(cases: List[Dict]) -> Optional[str]:
+def generate_initial_skill_proactive(cases: List[Dict], model: str = None) -> Optional[str]:
     """Generate initial proactive security skill."""
+    model = get_openrouter_model(model or DEFAULT_MODEL)
     chunk_content = format_chunk_content(cases)
 
     prompt = f"""You are a security engineer creating a PROACTIVE defense skill for code agents.
@@ -1439,7 +1456,7 @@ Generate the initial skill now:"""
 
     try:
         response = completion(
-            model="anthropic/claude-haiku-4-5-20251001",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=8192
@@ -1450,8 +1467,9 @@ Generate the initial skill now:"""
         return None
 
 
-def generate_initial_skill_constitutional(chunk_text: str, source_name: str) -> Optional[str]:
+def generate_initial_skill_constitutional(chunk_text: str, source_name: str, model: str = None) -> Optional[str]:
     """Generate initial constitutional security skill from safety standards."""
+    model = get_openrouter_model(model or DEFAULT_MODEL)
     prompt = f"""You are a security expert creating a security skill for AI code agents.
 
 **Context:**
@@ -1498,7 +1516,7 @@ Generate the complete security skill now:"""
     try:
         print("  Generating initial skill...")
         response = completion(
-            model="anthropic/claude-haiku-4-5-20251001",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=8192
@@ -1509,8 +1527,9 @@ Generate the complete security skill now:"""
         return None
 
 
-def refine_skill(existing_skill: str, content: str, source_info: str, chunk_num: int, total_chunks: int, skill_type: str) -> Optional[str]:
+def refine_skill(existing_skill: str, content: str, source_info: str, chunk_num: int, total_chunks: int, skill_type: str, model: str = None) -> Optional[str]:
     """Refine an existing security skill with new content."""
+    model = get_openrouter_model(model or DEFAULT_MODEL)
     if skill_type == "constitutional":
         prompt = f"""You are refining an existing security skill for AI code agents.
 
@@ -1554,7 +1573,7 @@ Return ONLY the updated skill content:"""
     try:
         print("  Refining skill...")
         response = completion(
-            model="anthropic/claude-haiku-4-5-20251001",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=8192
@@ -1622,6 +1641,7 @@ def generate_skill_from_cases(
     output_dir: str,
     dataset_ids: Optional[List[str]] = None,
     run_idx: Optional[int] = None,
+    model: Optional[str] = None,
 ) -> str:
     """Generate security skill from provided cases (reactive/proactive only).
 
@@ -1632,6 +1652,7 @@ def generate_skill_from_cases(
         output_dir: Directory to save skill
         dataset_ids: Original dataset IDs (for filename)
         run_idx: Run index (for filename)
+        model: Model to use for generation (uses DEFAULT_MODEL via OpenRouter if not specified)
 
     Returns:
         Generated skill content
@@ -1651,14 +1672,14 @@ def generate_skill_from_cases(
 
         if skill_content is None:
             if skill_type == "reactive":
-                skill_content = generate_initial_skill_reactive(chunk_cases)
+                skill_content = generate_initial_skill_reactive(chunk_cases, model=model)
             else:
-                skill_content = generate_initial_skill_proactive(chunk_cases)
+                skill_content = generate_initial_skill_proactive(chunk_cases, model=model)
         else:
             chunk_content = format_chunk_content(chunk_cases)
             skill_content = refine_skill(
                 skill_content, chunk_content, f"RedCode {split}",
-                chunk_num, total_chunks, skill_type
+                chunk_num, total_chunks, skill_type, model=model
             )
 
         if not skill_content:
@@ -1890,13 +1911,14 @@ def eval_gen_cases(
 # Main Evaluation Functions
 # ============================================================================
 
-def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]) -> str:
+def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]], model: Optional[str] = None) -> str:
     """Generate security skill and return its content.
 
     Args:
         skill_type: reactive, constitutional, or proactive
         split: exec, gen, or all
         dataset_ids: specific dataset IDs
+        model: Model to use for generation (uses DEFAULT_MODEL via OpenRouter if not specified)
 
     Returns:
         Generated skill content
@@ -1931,11 +1953,11 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
         for doc in documents:
             for chunk_idx, chunk_total, chunk_text in iter_text_chunks(doc["content"], CHUNK_SIZE_CHARS):
                 if skill_content is None:
-                    skill_content = generate_initial_skill_constitutional(chunk_text, doc["source"])
+                    skill_content = generate_initial_skill_constitutional(chunk_text, doc["source"], model=model)
                 else:
                     skill_content = refine_skill(
                         skill_content, chunk_text, doc["source"],
-                        chunk_idx, chunk_total, skill_type
+                        chunk_idx, chunk_total, skill_type, model=model
                     )
 
                 if not skill_content:
@@ -1973,14 +1995,14 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
 
             if skill_content is None:
                 if skill_type == "reactive":
-                    skill_content = generate_initial_skill_reactive(chunk_cases)
+                    skill_content = generate_initial_skill_reactive(chunk_cases, model=model)
                 else:
-                    skill_content = generate_initial_skill_proactive(chunk_cases)
+                    skill_content = generate_initial_skill_proactive(chunk_cases, model=model)
             else:
                 chunk_content = format_chunk_content(chunk_cases)
                 skill_content = refine_skill(
                     skill_content, chunk_content, f"RedCode {split}",
-                    chunk_num, total_chunks, skill_type
+                    chunk_num, total_chunks, skill_type, model=model
                 )
 
             if not skill_content:
