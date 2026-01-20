@@ -33,32 +33,28 @@ import sys
 # Path setup
 # ============================================================================
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-SRC_DIR = os.path.join(REPO_ROOT, "src")
+_SCRIPT_DIR = os.path.dirname(__file__)
+_SRC_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "src"))
 
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 
 # Import all shared functionality from core module
 from redcode_eval_core import (
     # Constants
     REPO_ROOT,
-    REDCODE_GEN_CATEGORIES,
     SKILL_TYPES,
     AGENT_CONFIGS,
     # Utilities
     load_config,
     get_model_short_name,
     get_agent_name,
-    get_exec_dataset_ids,
-    get_gen_dataset_ids,
     split_cases_by_dataset,
     load_redcode_datasets_for_generation,
     # Skill generation
     generate_skill_from_cases,
     inject_skill_into_config,
     # Evaluation
-    build_agent,
     eval_exec_cases,
     eval_gen_cases,
     generate_skill,
@@ -105,16 +101,6 @@ def run_reactive_proactive_experiment(
 
     # Load all cases once
     print(f"\nLoading RedCode benchmark cases...")
-
-    # Determine which datasets to load
-    exec_ids = []
-    gen_ids = []
-
-    if split in ('exec', 'all'):
-        exec_ids = get_exec_dataset_ids(dataset_ids, all_datasets)
-    if split in ('gen', 'all'):
-        gen_ids = get_gen_dataset_ids(dataset_ids, all_datasets)
-
     all_cases = load_redcode_datasets_for_generation(benchmark_dir, split, dataset_ids)
 
     if not all_cases:
