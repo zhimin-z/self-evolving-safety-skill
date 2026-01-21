@@ -71,6 +71,7 @@ from redcode_eval_core import (
     format_history,
     score_gen_response,
     score_exec_response,
+    generate_result_filename,
     # Skill generation
     generate_skill_from_cases,
     inject_skill_into_config,
@@ -305,9 +306,11 @@ def run_reactive_proactive_experiment(
         "Per-Case Results": aggregated_results,
     }
 
-    dataset_str = "-".join(all_dataset_ids) if len(all_dataset_ids) <= 5 else f"{len(all_dataset_ids)}datasets"
-    runs_str = f"_runs{n_runs}" if n_runs > 1 else ""
-    resfile = os.path.join(result_base, f"{split}_{dataset_str}_{skill_type}{runs_str}_{agent_name}_{model_name}_{time_stamp}.json")
+    # Use generate_result_filename for consistent naming, with runs suffix for aggregated results
+    runs_suffix = f"_runs{n_runs}" if n_runs > 1 else ""
+    resfile = os.path.join(result_base, generate_result_filename(
+        split, all_dataset_ids, agent_name, model_name, skill_type, suffix=runs_suffix
+    ))
 
     with open(resfile, "w") as f:
         json.dump(final_eval_log, f, indent=2)

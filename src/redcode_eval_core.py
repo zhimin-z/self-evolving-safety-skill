@@ -710,22 +710,52 @@ def get_agent_name(config_path: str) -> str:
 
 def generate_result_filename(
     split: str,
-    dataset_id: str,
+    dataset_ids: Any,  # str or List[str]
     agent_name: str,
     model_name: str,
     skill_type: Optional[str] = None,
     run_idx: Optional[int] = None,
+    is_baseline: bool = False,
     suffix: str = ""
 ) -> str:
-    """Generate a descriptive result filename."""
+    """Generate a descriptive result filename.
+
+    Args:
+        split: exec, gen, or all
+        dataset_ids: Single dataset ID (str) or list of dataset IDs
+        agent_name: Agent name for filename
+        model_name: Model name for filename
+        skill_type: Skill type (reactive, proactive, constitutional) - context for comparison
+        run_idx: Run index for multiple runs
+        is_baseline: If True, this is a baseline run (adds "_baseline" after skill_type)
+        suffix: Optional suffix before .json
+
+    Returns:
+        Filename like: exec_1_2_3_agent_constitutional_baseline_model_timestamp.json (baseline)
+                   or: exec_4_agent_reactive_run1_model_timestamp.json (with skill)
+    """
     time_now = datetime.datetime.now()
     time_stamp = time_now.strftime("%Y-%m-%d_%H-%M-%S")
     model_clean = model_name.replace("/", "-").replace(" ", "_")
     agent_clean = agent_name.replace("/", "-").replace(" ", "_")
 
-    parts = [split, dataset_id, agent_clean]
+    # Format dataset_ids: join with underscore if list, otherwise use as-is
+    if isinstance(dataset_ids, list):
+        if len(dataset_ids) <= 5:
+            dataset_str = "_".join(str(d) for d in dataset_ids)
+        else:
+            dataset_str = f"{len(dataset_ids)}datasets"
+    else:
+        dataset_str = str(dataset_ids)
+
+    parts = [split, dataset_str, agent_clean]
+
+    # Add skill_type context and baseline indicator
     if skill_type:
         parts.append(skill_type)
+    if is_baseline:
+        parts.append("baseline")
+
     if run_idx is not None:
         parts.append(f"run{run_idx}")
     parts.extend([model_clean, time_stamp])
@@ -1779,6 +1809,9 @@ def eval_exec_cases(
     score_dist = dict(Counter(scores))
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
+    # Extract unique dataset_ids from cases
+    unique_dataset_ids = sorted(set(case["dataset_id"] for case in cases))
+
     eval_log = {
         "Split": "exec",
         "Skill": skill_type,
@@ -1800,7 +1833,7 @@ def eval_exec_cases(
     }
 
     resfile = os.path.join(result_base, generate_result_filename(
-        "exec", "pooled", agent_name, model_name, skill_type, run_idx
+        "exec", unique_dataset_ids, agent_name, model_name, skill_type, run_idx
     ))
 
     with open(resfile, "w") as f:
@@ -1877,6 +1910,9 @@ def eval_gen_cases(
     score_dist = dict(Counter(scores))
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
+    # Extract unique dataset_ids from cases
+    unique_dataset_ids = sorted(set(case["dataset_id"] for case in cases))
+
     eval_log = {
         "Split": "gen",
         "Skill": skill_type,
@@ -1898,7 +1934,7 @@ def eval_gen_cases(
     }
 
     resfile = os.path.join(result_base, generate_result_filename(
-        "gen", "pooled", agent_name, model_name, skill_type, run_idx
+        "gen", unique_dataset_ids, agent_name, model_name, skill_type, run_idx
     ))
 
     with open(resfile, "w") as f:
@@ -2035,6 +2071,9 @@ def run_evaluation(
     """Run RedCode evaluation."""
     import copy
 
+    # Determine if this is a baseline run (no skill content injected)
+    is_baseline = skill_content is None
+
     # Inject skill if provided
     if skill_type and skill_content:
         print("Injecting skill into agent's system prompt...")
@@ -2084,7 +2123,9 @@ def run_evaluation(
         print(f"[RedCode-Exec] Evaluating dataset {dataset_id}{skill_label}")
         print(f"{'='*60}\n")
 
-        resfile = os.path.join(result_base, generate_result_filename("exec", dataset_id, agent_name, model_name, skill_type))
+        resfile = os.path.join(result_base, generate_result_filename(
+            "exec", dataset_id, agent_name, model_name, skill_type, is_baseline=is_baseline
+        ))
 
         if dry_run:
             print("DRY RUN MODE: Skipping execution")
@@ -2124,7 +2165,9 @@ def run_evaluation(
         print(f"[RedCode-Gen] Evaluating category: {category} ({len(cases)} cases){skill_label}")
         print(f"{'='*60}\n")
 
-        resfile = os.path.join(result_base, generate_result_filename("gen", category, agent_name, model_name, skill_type))
+        resfile = os.path.join(result_base, generate_result_filename(
+            "gen", category, agent_name, model_name, skill_type, is_baseline=is_baseline
+        ))
 
         if dry_run:
             print("DRY RUN MODE: Skipping execution")
