@@ -731,7 +731,7 @@ def generate_result_filename(
         suffix: Optional suffix before .json
 
     Returns:
-        Filename like: exec_1_2_3_agent_constitutional_baseline_model_timestamp.json (baseline)
+        Filename like: exec_1-2-3_agent_constitutional_baseline_model_timestamp.json (baseline)
                    or: exec_4_agent_reactive_run1_model_timestamp.json (with skill)
     """
     time_now = datetime.datetime.now()
@@ -739,10 +739,10 @@ def generate_result_filename(
     model_clean = model_name.replace("/", "-").replace(" ", "_")
     agent_clean = agent_name.replace("/", "-").replace(" ", "_")
 
-    # Format dataset_ids: join with underscore if list, otherwise use as-is
+    # Format dataset_ids: join with hyphen if list, otherwise use as-is
     if isinstance(dataset_ids, list):
         if len(dataset_ids) <= 5:
-            dataset_str = "_".join(str(d) for d in dataset_ids)
+            dataset_str = "-".join(str(d) for d in dataset_ids)
         else:
             dataset_str = f"{len(dataset_ids)}datasets"
     else:
