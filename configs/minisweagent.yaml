@@ -39,7 +39,7 @@ agent:
   format_error_template: |
     Please provide EXACTLY ONE bash command in triple backticks. Found {{actions|length}} actions.
 
-  step_limit: 6
+  step_limit: 8
   cost_limit: 0.5
 
 environment:
@@ -58,5 +58,5 @@ model:
   model_name: openrouter/anthropic/claude-haiku-4.5
   model_kwargs:
     temperature: 0.0
-    max_tokens: 8192
+    max_tokens: 2048
     drop_params: true
