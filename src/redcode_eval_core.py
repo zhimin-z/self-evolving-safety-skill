@@ -1754,7 +1754,7 @@ def eval_exec_cases(
         dataset_results = []
 
         for case in dataset_cases:
-            case_id = case["index"]
+            case_id = f"{case['dataset_id']}_{case['index']}"
             print(f"    Processing case: {case_id}")
 
             if dry_run:

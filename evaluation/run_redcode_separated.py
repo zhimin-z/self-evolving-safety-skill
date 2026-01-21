@@ -43,13 +43,10 @@ Output Files (all in results/ folder):
 
 import argparse
 import copy
-import datetime
 import hashlib
-import json
 import os
 import sys
 import time
-from collections import Counter
 
 # ============================================================================
 # Path setup
@@ -65,10 +62,8 @@ if _SRC_DIR not in sys.path:
 from redcode_eval_core import (
     # Constants
     REPO_ROOT,
-    REDCODE_GEN_CATEGORIES,
     SKILL_TYPES,
     AGENT_CONFIGS,
-    CODE_GENERATION_PROMPT,
     # Utilities
     load_config,
     get_model_full_name,
@@ -78,15 +73,12 @@ from redcode_eval_core import (
     get_gen_dataset_ids,
     split_cases_by_dataset,
     load_redcode_datasets_for_generation,
-    format_history,
-    score_gen_response,
-    score_exec_response,
-    generate_result_filename,
     # Skill generation
     generate_skill_from_cases,
     inject_skill_into_config,
     # Evaluation
-    build_agent,
+    eval_exec_cases,
+    eval_gen_cases,
     generate_skill,
     run_evaluation,
     Container,
@@ -118,9 +110,9 @@ def run_reactive_proactive_experiment(
         1. Split that dataset 50/50 with run-specific seed
         2. Generate skill from train half
         3. Evaluate skill on test half immediately
-        4. Collect results
+        4. Save results per run with successive run indices
 
-    Finally: aggregate all results into final output.
+    Uses eval_exec_cases/eval_gen_cases from core module for consistent evaluation.
     """
     benchmark_dir = os.path.join(REPO_ROOT, "external/RedCode/dataset")
     output_dir = os.path.join(REPO_ROOT, "security-skills")
@@ -149,9 +141,8 @@ def run_reactive_proactive_experiment(
 
     start_time = time.time()
 
-    # Collect results from all datasets (separate skill vs baseline)
-    aggregated_skill_results = []
-    aggregated_baseline_results = []
+    # Track global run index across all datasets for successive numbering
+    global_run_idx = 0
 
     total_iterations = len(all_dataset_ids) * n_runs
     iteration = 0
@@ -168,18 +159,19 @@ def run_reactive_proactive_experiment(
             print(f"  Warning: No cases found for dataset {dataset_id}, skipping...")
             continue
 
-        for run_idx in range(1, n_runs + 1):
+        for local_run_idx in range(1, n_runs + 1):
+            global_run_idx += 1
             iteration += 1
             print(f"\n{'='*60}")
-            print(f"[{iteration}/{total_iterations}] Dataset: {dataset_id}, Run: {run_idx}/{n_runs}")
+            print(f"[{iteration}/{total_iterations}] Dataset: {dataset_id}, Run: {global_run_idx}")
             print(f"{'='*60}")
 
             print(f"  Loaded {len(cases)} cases")
 
-            # Split 50/50 with seed based on both dataset_id and run_idx
+            # Split 50/50 with seed based on both dataset_id and local_run_idx
             # Use hashlib for deterministic hashing (Python's hash() is randomized by default)
             dataset_hash = int(hashlib.md5(str(dataset_id).encode()).hexdigest(), 16)
-            seed = (dataset_hash + run_idx) % (2**31)
+            seed = (dataset_hash + local_run_idx) % (2**31)
             train_cases, test_cases = split_cases_by_dataset(cases, train_ratio=0.5, seed=seed)
 
             print(f"  Train: {len(train_cases)} cases, Test: {len(test_cases)} cases")
@@ -191,7 +183,7 @@ def run_reactive_proactive_experiment(
                 split=dataset_split,
                 output_dir=output_dir,
                 dataset_ids=[dataset_id],
-                run_idx=run_idx,
+                run_idx=global_run_idx,
                 model=get_model_full_name(config),
             )
 
@@ -202,162 +194,98 @@ def run_reactive_proactive_experiment(
             def create_container():
                 return Container("redcode")
 
-            # Helper function to evaluate cases with a given config
-            def evaluate_cases(eval_config, label):
-                results = []
-                for case in test_cases:
-                    case_id = case["index"] if is_exec else f"{case['dataset_id']}_{case['index']}"
-                    print(f"      Processing case: {case_id}")
-
-                    if dry_run:
-                        results.append({"case_id": case_id, "score": 1, "reason": "dry_run"})
-                        continue
-
-                    container = create_container()
-                    agent = build_agent(eval_config, container, step_limit, timeout, agent_type=agent_type)
-
-                    try:
-                        agent.env.reset_history()
-
-                        if is_exec:
-                            prompt = case["content"]
-                        else:
-                            prompt = CODE_GENERATION_PROMPT + case["content"]
-
-                        status, message = agent.run(prompt)
-
-                        exec_history = agent.env.get_history()
-                        response = message
-                        if exec_history:
-                            response = format_history(exec_history)
-
-                        if is_exec:
-                            score = score_exec_response(
-                                container=container.container,
-                                case_index=case["index"],
-                                response=response,
-                                expected_result=case.get("expected_result", ""),
-                                had_execution=bool(exec_history),
-                            )
-                        else:
-                            score = score_gen_response(response, case["content"])
-
-                        results.append({
-                            "case_id": case_id,
-                            "dataset_id": dataset_id,
-                            "run_idx": run_idx,
-                            "score": score,
-                            "status": status,
-                        })
-
-                    except Exception as exc:
-                        results.append({
-                            "case_id": case_id,
-                            "dataset_id": dataset_id,
-                            "run_idx": run_idx,
-                            "score": 1,
-                            "error": str(exc),
-                        })
-
-                    finally:
-                        container.close()
-
-                    print(f"        Score: {results[-1]['score']}")
-                return results
+            # Separate test cases by split type (all should be same type here)
+            exec_test = [c for c in test_cases if c["split"] == "exec"]
+            gen_test = [c for c in test_cases if c["split"] == "gen"]
 
             # =====================================================================
             # PART A: Evaluate WITH skill
             # =====================================================================
             print(f"\n  [A] Evaluating WITH {skill_type} skill on {len(test_cases)} test cases...")
-            skill_results = evaluate_cases(dataset_config, "with skill")
-            aggregated_skill_results.extend(skill_results)
 
-            # Print skill results summary
-            scores = [r['score'] for r in skill_results]
-            if scores:
-                score_dist = dict(Counter(scores))
-                print(f"\n    WITH SKILL - Score distribution: {score_dist}")
+            if exec_test:
+                eval_exec_cases(
+                    cases=exec_test,
+                    config=dataset_config,
+                    container_factory=create_container,
+                    step_limit=step_limit,
+                    timeout=timeout,
+                    result_base=result_base,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    skill_type=skill_type,
+                    run_idx=global_run_idx,
+                    dry_run=dry_run,
+                    agent_type=agent_type,
+                    is_baseline=False,
+                )
+
+            if gen_test:
+                eval_gen_cases(
+                    cases=gen_test,
+                    config=dataset_config,
+                    container_factory=create_container,
+                    step_limit=step_limit,
+                    timeout=timeout,
+                    result_base=result_base,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    skill_type=skill_type,
+                    run_idx=global_run_idx,
+                    dry_run=dry_run,
+                    agent_type=agent_type,
+                    is_baseline=False,
+                )
 
             # =====================================================================
             # PART B: Evaluate baseline (no skill) on same test cases for comparison
             # =====================================================================
             print(f"\n  [B] Evaluating BASELINE (no skill) on same {len(test_cases)} test cases...")
-            baseline_results = evaluate_cases(config, "baseline")
-            aggregated_baseline_results.extend(baseline_results)
 
-            # Print baseline results summary
-            scores = [r['score'] for r in baseline_results]
-            if scores:
-                score_dist = dict(Counter(scores))
-                print(f"\n    BASELINE - Score distribution: {score_dist}")
+            if exec_test:
+                eval_exec_cases(
+                    cases=exec_test,
+                    config=config,  # Original config WITHOUT skill injection
+                    container_factory=create_container,
+                    step_limit=step_limit,
+                    timeout=timeout,
+                    result_base=result_base,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    skill_type=skill_type,  # Keep skill_type for context in filename
+                    run_idx=global_run_idx,
+                    dry_run=dry_run,
+                    agent_type=agent_type,
+                    is_baseline=True,
+                )
 
-    # Save aggregated final results (both skill and baseline)
+            if gen_test:
+                eval_gen_cases(
+                    cases=gen_test,
+                    config=config,  # Original config WITHOUT skill injection
+                    container_factory=create_container,
+                    step_limit=step_limit,
+                    timeout=timeout,
+                    result_base=result_base,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    skill_type=skill_type,  # Keep skill_type for context in filename
+                    run_idx=global_run_idx,
+                    dry_run=dry_run,
+                    agent_type=agent_type,
+                    is_baseline=True,
+                )
+
+            print(f"\n  Run {global_run_idx} complete! (with skill + baseline)")
+
+    total_duration = time.time() - start_time
     print(f"\n{'='*60}")
-    print("Aggregating final results...")
-    print(f"{'='*60}")
-
-    duration = time.time() - start_time
-    time_now = datetime.datetime.now()
-    time_stamp = time_now.strftime("%Y-%m-%d_%H-%M-%S")
-    runs_suffix = f"_runs{n_runs}" if n_runs > 1 else ""
-
-    # Helper to create eval log
-    def create_eval_log(results, is_baseline):
-        all_scores = [r['score'] for r in results]
-        return {
-            "Skill": skill_type,
-            "Is Baseline": is_baseline,
-            "Split": split,
-            "Datasets": all_dataset_ids,
-            "N_Runs": n_runs,
-            "Agent": agent_name,
-            "Model": get_model_full_name(config),
-            "Timestamp": time_stamp,
-            "Duration (seconds)": round(duration, 2),
-            "Config": {
-                "step_limit": step_limit,
-                "timeout": timeout,
-                "n_runs": n_runs,
-                "dry_run": dry_run,
-            },
-            "Total Cases": len(results),
-            "Score Distribution": dict(Counter(all_scores)),
-            "Refusal Rate (score=0)": all_scores.count(0) / len(all_scores) if all_scores else 0,
-            "Attack Success Rate (score=3)": all_scores.count(3) / len(all_scores) if all_scores else 0,
-            "Per-Case Results": results,
-        }
-
-    # Save WITH SKILL results
-    skill_eval_log = create_eval_log(aggregated_skill_results, is_baseline=False)
-    skill_resfile = os.path.join(result_base, generate_result_filename(
-        split, all_dataset_ids, agent_name, model_name, skill_type, is_baseline=False, suffix=runs_suffix
-    ))
-    with open(skill_resfile, "w") as f:
-        json.dump(skill_eval_log, f, indent=2)
-
-    # Save BASELINE results
-    baseline_eval_log = create_eval_log(aggregated_baseline_results, is_baseline=True)
-    baseline_resfile = os.path.join(result_base, generate_result_filename(
-        split, all_dataset_ids, agent_name, model_name, skill_type, is_baseline=True, suffix=runs_suffix
-    ))
-    with open(baseline_resfile, "w") as f:
-        json.dump(baseline_eval_log, f, indent=2)
-
-    print(f"\nFinal Results:")
-    print(f"\n  WITH SKILL:")
-    print(f"    Total cases: {len(aggregated_skill_results)}")
-    print(f"    Score distribution: {skill_eval_log['Score Distribution']}")
-    print(f"    Refusal rate: {skill_eval_log['Refusal Rate (score=0)']:.2%}")
-    print(f"    Attack success rate: {skill_eval_log['Attack Success Rate (score=3)']:.2%}")
-    print(f"\n  BASELINE:")
-    print(f"    Total cases: {len(aggregated_baseline_results)}")
-    print(f"    Score distribution: {baseline_eval_log['Score Distribution']}")
-    print(f"    Refusal rate: {baseline_eval_log['Refusal Rate (score=0)']:.2%}")
-    print(f"    Attack success rate: {baseline_eval_log['Attack Success Rate (score=3)']:.2%}")
-    print(f"\n  Duration: {duration:.1f}s")
-    print(f"\nResults saved to:")
-    print(f"  - {skill_resfile} (with skill)")
-    print(f"  - {baseline_resfile} (baseline)")
+    print(f"All {total_iterations} runs complete!")
+    print(f"Total duration: {total_duration:.1f}s")
+    print(f"Results saved to: {result_base}")
+    print(f"  - Each run generates TWO result files:")
+    print(f"    - *_{skill_type}_run*.json (with skill)")
+    print(f"    - *_{skill_type}_baseline_run*.json (baseline comparison)")
     print(f"{'='*60}\n")
 
 
