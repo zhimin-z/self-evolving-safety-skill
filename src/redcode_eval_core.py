@@ -1735,6 +1735,7 @@ def eval_exec_cases(
     run_idx: int,
     dry_run: bool,
     agent_type: str = "mini",
+    is_baseline: bool = False,
 ):
     """Evaluate agent on specific RedCode-Exec cases."""
     os.makedirs(result_base, exist_ok=True)
@@ -1815,6 +1816,7 @@ def eval_exec_cases(
     eval_log = {
         "Split": "exec",
         "Skill": skill_type,
+        "Is Baseline": is_baseline,
         "Run": run_idx,
         "Agent": agent_name,
         "Model": get_model_full_name(config),
@@ -1833,7 +1835,7 @@ def eval_exec_cases(
     }
 
     resfile = os.path.join(result_base, generate_result_filename(
-        "exec", unique_dataset_ids, agent_name, model_name, skill_type, run_idx
+        "exec", unique_dataset_ids, agent_name, model_name, skill_type, run_idx, is_baseline=is_baseline
     ))
 
     with open(resfile, "w") as f:
@@ -1856,6 +1858,7 @@ def eval_gen_cases(
     run_idx: int,
     dry_run: bool,
     agent_type: str = "mini",
+    is_baseline: bool = False,
 ):
     """Evaluate agent on specific RedCode-Gen cases."""
     os.makedirs(result_base, exist_ok=True)
@@ -1916,6 +1919,7 @@ def eval_gen_cases(
     eval_log = {
         "Split": "gen",
         "Skill": skill_type,
+        "Is Baseline": is_baseline,
         "Run": run_idx,
         "Agent": agent_name,
         "Model": get_model_full_name(config),
@@ -1934,7 +1938,7 @@ def eval_gen_cases(
     }
 
     resfile = os.path.join(result_base, generate_result_filename(
-        "gen", unique_dataset_ids, agent_name, model_name, skill_type, run_idx
+        "gen", unique_dataset_ids, agent_name, model_name, skill_type, run_idx, is_baseline=is_baseline
     ))
 
     with open(resfile, "w") as f:
@@ -2074,13 +2078,16 @@ def run_evaluation(
     # Determine if this is a baseline run (no skill content injected)
     is_baseline = skill_content is None
 
+    # All results go to the same folder; baseline is indicated in filename
+    result_base = os.path.join(REPO_ROOT, "results")
+
     # Inject skill if provided
     if skill_type and skill_content:
         print("Injecting skill into agent's system prompt...")
         config = inject_skill_into_config(copy.deepcopy(config), skill_content, skill_type)
-        result_base = os.path.join(REPO_ROOT, "results/with_skills")
     else:
-        result_base = os.path.join(REPO_ROOT, "results/baseline")
+        # Baseline run (either comparison baseline or pure baseline)
+        print("Running baseline evaluation (no skill injection)...")
 
     os.makedirs(result_base, exist_ok=True)
     print(f"Results will be saved to: {result_base}")
@@ -2118,7 +2125,12 @@ def run_evaluation(
             print(f"\nWarning: Dataset file not found: {jsonfile}, skipping...")
             continue
 
-        skill_label = f" WITH skill '{skill_type}'" if skill_type else ""
+        if skill_type and not is_baseline:
+            skill_label = f" WITH skill '{skill_type}'"
+        elif skill_type and is_baseline:
+            skill_label = f" BASELINE (for '{skill_type}' comparison)"
+        else:
+            skill_label = ""
         print(f"\n{'='*60}")
         print(f"[RedCode-Exec] Evaluating dataset {dataset_id}{skill_label}")
         print(f"{'='*60}\n")
@@ -2160,7 +2172,12 @@ def run_evaluation(
             print(f"\nWarning: No cases found for category: {category}, skipping...")
             continue
 
-        skill_label = f" WITH skill '{skill_type}'" if skill_type else ""
+        if skill_type and not is_baseline:
+            skill_label = f" WITH skill '{skill_type}'"
+        elif skill_type and is_baseline:
+            skill_label = f" BASELINE (for '{skill_type}' comparison)"
+        else:
+            skill_label = ""
         print(f"\n{'='*60}")
         print(f"[RedCode-Gen] Evaluating category: {category} ({len(cases)} cases){skill_label}")
         print(f"{'='*60}\n")

@@ -2,26 +2,36 @@
 """
 RedCode evaluation script with optional skill generation (AGGREGATED mode).
 
-If --skill is specified, generates the skill first then evaluates with it.
-If --skill is omitted, runs baseline evaluation (no skill).
+**Key Behavior:**
+- If --skill is specified: generates TWO result files per evaluation
+  - One WITH skill applied
+  - One WITHOUT skill (baseline) for comparison on the same test cases
+- If --skill is omitted: runs baseline evaluation only (single result file)
 
 For reactive/proactive skills: runs N iterations with random 50/50 train/test splits.
 For constitutional skills: single generation from safety standards (no split).
 
 Usage:
-    # Baseline evaluation (no skill)
+    # Baseline evaluation only (no skill, single result file)
     python evaluation/run_redcode_aggregated.py --split exec --dataset_ids 4
     python evaluation/run_redcode_aggregated.py --split exec --all
 
-    # With skill: generate + evaluate (N random splits)
+    # With skill: generates BOTH skill and baseline results for comparison
     python evaluation/run_redcode_aggregated.py --skill reactive --split exec --dataset_ids 4 --n_runs 5
     python evaluation/run_redcode_aggregated.py --skill proactive --split all --all --n_runs 3
 
-    # Constitutional (no random split, uses safety model)
+    # Constitutional (single generation, evaluates both with skill and baseline)
     python evaluation/run_redcode_aggregated.py --skill constitutional --split exec --all
 
     # Dry run
     python evaluation/run_redcode_aggregated.py --split exec --dataset_ids 4 --dry_run
+
+Output Files (all in results/ folder):
+    With skill specified:
+      - results/exec_4_agent_reactive_run1_model_timestamp.json  (with skill)
+      - results/exec_4_agent_reactive_baseline_run1_model_timestamp.json  (baseline)
+    Without skill:
+      - results/exec_4_agent_baseline_model_timestamp.json
 """
 
 import argparse
@@ -94,7 +104,7 @@ def run_reactive_proactive_experiment(
     """
     benchmark_dir = os.path.join(REPO_ROOT, "external/RedCode/dataset")
     output_dir = os.path.join(REPO_ROOT, "security-skills")
-    result_base = os.path.join(REPO_ROOT, "results/with_skills")
+    result_base = os.path.join(REPO_ROOT, "results")
     os.makedirs(result_base, exist_ok=True)
 
     # Determine which datasets to process
@@ -157,12 +167,14 @@ def run_reactive_proactive_experiment(
         def create_container():
             return Container("redcode")
 
-        # Evaluate on test cases
-        print(f"\n  Evaluating skill on {len(test_cases)} test cases...")
-
         # Separate test cases by split type
         exec_test = [c for c in test_cases if c["split"] == "exec"]
         gen_test = [c for c in test_cases if c["split"] == "gen"]
+
+        # =====================================================================
+        # PART A: Evaluate WITH skill
+        # =====================================================================
+        print(f"\n  [A] Evaluating WITH {skill_type} skill on {len(test_cases)} test cases...")
 
         if exec_test:
             eval_exec_cases(
@@ -178,6 +190,7 @@ def run_reactive_proactive_experiment(
                 run_idx=run_idx,
                 dry_run=dry_run,
                 agent_type=agent_type,
+                is_baseline=False,
             )
 
         if gen_test:
@@ -194,13 +207,56 @@ def run_reactive_proactive_experiment(
                 run_idx=run_idx,
                 dry_run=dry_run,
                 agent_type=agent_type,
+                is_baseline=False,
             )
 
-        print(f"\n[Run {run_idx}/{n_runs}] Complete!")
+        # =====================================================================
+        # PART B: Evaluate baseline (no skill) on same test cases for comparison
+        # =====================================================================
+        print(f"\n  [B] Evaluating BASELINE (no skill) on same {len(test_cases)} test cases...")
+
+        if exec_test:
+            eval_exec_cases(
+                cases=exec_test,
+                config=config,  # Original config WITHOUT skill injection
+                container_factory=create_container,
+                step_limit=step_limit,
+                timeout=timeout,
+                result_base=result_base,
+                agent_name=agent_name,
+                model_name=model_name,
+                skill_type=skill_type,  # Keep skill_type for context in filename
+                run_idx=run_idx,
+                dry_run=dry_run,
+                agent_type=agent_type,
+                is_baseline=True,
+            )
+
+        if gen_test:
+            eval_gen_cases(
+                cases=gen_test,
+                config=config,  # Original config WITHOUT skill injection
+                container_factory=create_container,
+                step_limit=step_limit,
+                timeout=timeout,
+                result_base=result_base,
+                agent_name=agent_name,
+                model_name=model_name,
+                skill_type=skill_type,  # Keep skill_type for context in filename
+                run_idx=run_idx,
+                dry_run=dry_run,
+                agent_type=agent_type,
+                is_baseline=True,
+            )
+
+        print(f"\n[Run {run_idx}/{n_runs}] Complete! (with skill + baseline)")
 
     print(f"\n{'='*60}")
     print(f"All {n_runs} runs complete!")
     print(f"Results saved to: {result_base}")
+    print(f"  - Each run generates TWO result files:")
+    print(f"    - *_{skill_type}_run*.json (with skill)")
+    print(f"    - *_{skill_type}_baseline_run*.json (baseline comparison)")
     print(f"{'='*60}\n")
 
 
@@ -215,15 +271,19 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Baseline evaluation (no skill)
+  # Baseline evaluation only (no skill, single result file)
   python evaluation/run_redcode_aggregated.py --split exec --dataset_ids 4
 
-  # Reactive/Proactive: N runs with 50/50 train/test splits
+  # With skill: generates BOTH skill and baseline results for comparison
   python evaluation/run_redcode_aggregated.py --skill reactive --split exec --dataset_ids 1 2 3 --n_runs 5
   python evaluation/run_redcode_aggregated.py --skill proactive --split all --all --n_runs 3
 
-  # Constitutional: single generation from safety standards (no split)
+  # Constitutional: generates BOTH skill and baseline results
   python evaluation/run_redcode_aggregated.py --skill constitutional --split exec --all
+
+Output:
+  With --skill: TWO files per evaluation (skill + baseline on same test cases)
+  Without --skill: ONE file (baseline only)
 """
     )
 
@@ -320,13 +380,32 @@ Examples:
         skill_content = generate_skill(args.skill, args.split, args.dataset_ids, model=get_model_full_name(config))
 
         print("=" * 60)
-        print("[2/2] Running RedCode evaluation with constitutional skill")
+        print("[2/3] Running RedCode evaluation WITH constitutional skill")
         print("=" * 60 + "\n")
 
         run_evaluation(
             config=config,
             skill_type=args.skill,
             skill_content=skill_content,
+            split=args.split,
+            dataset_ids=args.dataset_ids,
+            all_datasets=args.all,
+            dry_run=args.dry_run,
+            step_limit=args.step_limit,
+            timeout=args.timeout,
+            agent_name=agent_name,
+            model_name=model_name,
+            agent_type=args.agent,
+        )
+
+        print("=" * 60)
+        print("[3/3] Running BASELINE evaluation (no skill) for comparison")
+        print("=" * 60 + "\n")
+
+        run_evaluation(
+            config=config,
+            skill_type=args.skill,  # Keep skill_type for context in filename
+            skill_content=None,  # No skill injection = baseline
             split=args.split,
             dataset_ids=args.dataset_ids,
             all_datasets=args.all,
