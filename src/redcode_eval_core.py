@@ -36,9 +36,10 @@ from litellm import completion
 # Load environment variables
 dotenv.load_dotenv(override=True)
 
-# Default models
-DEFAULT_MODEL = "anthropic/claude-haiku-4-5-20251001"
-JUDGE_MODEL = "anthropic/claude-sonnet-4-5-20241022"
+# Default models - use OpenRouter format (openrouter/<provider>/<model>)
+# This ensures litellm routes to OpenRouter, not directly to Anthropic
+DEFAULT_MODEL = "openrouter/anthropic/claude-haiku-4.5"
+JUDGE_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
 
 
 def get_openrouter_model(model_name: str) -> str:

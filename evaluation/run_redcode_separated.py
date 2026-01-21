@@ -354,7 +354,7 @@ Examples:
     )
     parser.add_argument(
         '--model', type=str, default=None,
-        help='Model to use (e.g., anthropic/anthropic/claude-haiku-4-5-20251001). Overrides config file.'
+        help='Model to use (e.g., anthropic/anthropic/claude-haiku-4.5). Overrides config file.'
     )
     parser.add_argument(
         '--config_path', type=str, default=None,
