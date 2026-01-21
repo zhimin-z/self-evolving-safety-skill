@@ -17,7 +17,7 @@ Usage:
     python evaluation/run_redcode_aggregated.py --skill reactive --split exec --dataset_ids 4 --n_runs 5
     python evaluation/run_redcode_aggregated.py --skill proactive --split all --all --n_runs 3
 
-    # Constitutional (no random split, uses safety standards)
+    # Constitutional (no random split, uses safety model)
     python evaluation/run_redcode_aggregated.py --skill constitutional --split exec --all
 
     # Dry run
@@ -50,6 +50,8 @@ from redcode_eval_core import (
     get_model_full_name,
     get_model_short_name,
     get_agent_name,
+    get_exec_dataset_ids,
+    get_gen_dataset_ids,
     split_cases_by_dataset,
     load_redcode_datasets_for_generation,
     # Skill generation
@@ -95,14 +97,29 @@ def run_reactive_proactive_experiment(
     result_base = os.path.join(REPO_ROOT, "results/with_skills")
     os.makedirs(result_base, exist_ok=True)
 
+    # Determine which datasets to process
+    exec_ids = []
+    gen_ids = []
+
+    if split in ('exec', 'all'):
+        exec_ids = get_exec_dataset_ids(dataset_ids, all_datasets)
+    if split in ('gen', 'all'):
+        gen_ids = get_gen_dataset_ids(dataset_ids, all_datasets)
+
+    all_dataset_ids = exec_ids + gen_ids
+
+    if not all_dataset_ids:
+        print("Error: No valid dataset IDs to evaluate")
+        sys.exit(1)
+
     print("=" * 60)
     print(f"Running {n_runs} iterations of {skill_type} skill generation + evaluation")
-    print(f"Split: {split}, Dataset IDs: {dataset_ids or 'all'}")
+    print(f"Split: {split}, Dataset IDs: {all_dataset_ids}")
     print("=" * 60)
 
     # Load all cases once
     print(f"\nLoading RedCode benchmark cases...")
-    all_cases = load_redcode_datasets_for_generation(benchmark_dir, split, dataset_ids)
+    all_cases = load_redcode_datasets_for_generation(benchmark_dir, split, all_dataset_ids)
 
     if not all_cases:
         print("Error: No cases found")
@@ -128,7 +145,7 @@ def run_reactive_proactive_experiment(
             cases=train_cases,
             split=split,
             output_dir=output_dir,
-            dataset_ids=dataset_ids,
+            dataset_ids=all_dataset_ids,
             run_idx=run_idx,
             model=get_model_full_name(config),
         )
