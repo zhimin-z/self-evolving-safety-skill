@@ -14,14 +14,14 @@ For constitutional skills: single generation from safety standards (no split).
 Usage:
     # Baseline evaluation only (no skill, single result file)
     python evaluation/run_redcode_aggregated.py --split exec --dataset_ids 4
-    python evaluation/run_redcode_aggregated.py --split exec --all
+    python evaluation/run_redcode_aggregated.py --split exec --dataset_ids all
 
     # With skill: generates BOTH skill and baseline results for comparison
     python evaluation/run_redcode_aggregated.py --skill reactive --split exec --dataset_ids 4 --n_runs 5
-    python evaluation/run_redcode_aggregated.py --skill proactive --split all --all --n_runs 3
+    python evaluation/run_redcode_aggregated.py --skill proactive --split all --dataset_ids all --n_runs 3
 
     # Constitutional (single generation, evaluates both with skill and baseline)
-    python evaluation/run_redcode_aggregated.py --skill constitutional --split exec --all
+    python evaluation/run_redcode_aggregated.py --skill constitutional --split exec --dataset_ids all
 
     # Dry run
     python evaluation/run_redcode_aggregated.py --split exec --dataset_ids 4 --dry_run
@@ -276,10 +276,10 @@ Examples:
 
   # With skill: generates BOTH skill and baseline results for comparison
   python evaluation/run_redcode_aggregated.py --skill reactive --split exec --dataset_ids 1 2 3 --n_runs 5
-  python evaluation/run_redcode_aggregated.py --skill proactive --split all --all --n_runs 3
+  python evaluation/run_redcode_aggregated.py --skill proactive --split all --dataset_ids all --n_runs 3
 
   # Constitutional: generates BOTH skill and baseline results
-  python evaluation/run_redcode_aggregated.py --skill constitutional --split exec --all
+  python evaluation/run_redcode_aggregated.py --skill constitutional --split exec --dataset_ids all
 
 Output:
   With --skill: TWO files per evaluation (skill + baseline on same test cases)
@@ -308,12 +308,8 @@ Output:
         help='Dataset split to evaluate'
     )
     parser.add_argument(
-        '--dataset_ids', type=str, nargs='+', default=None,
-        help='Dataset IDs: 1-27 for exec, category names for gen'
-    )
-    parser.add_argument(
-        '--all', action='store_true',
-        help='Evaluate all datasets in the specified split'
+        '--dataset_ids', type=str, nargs='+', required=True,
+        help='Dataset IDs: 1-27 for exec, category names for gen, or "all" for all datasets'
     )
     parser.add_argument(
         '--n_runs', type=int, default=1,
@@ -334,10 +330,9 @@ Output:
 
     args = parser.parse_args()
 
-    # Validate arguments
-    if not args.all and not args.dataset_ids:
-        print("Error: Must specify --dataset_ids or --all")
-        sys.exit(1)
+    # Check if "all" was specified
+    all_datasets = 'all' in args.dataset_ids
+    dataset_ids = None if all_datasets else args.dataset_ids
 
     # Load config
     config_path = args.config_path or os.path.join(REPO_ROOT, AGENT_CONFIGS[args.agent])
@@ -363,8 +358,8 @@ Output:
         run_reactive_proactive_experiment(
             skill_type=args.skill,
             split=args.split,
-            dataset_ids=args.dataset_ids,
-            all_datasets=args.all,
+            dataset_ids=dataset_ids,
+            all_datasets=all_datasets,
             n_runs=args.n_runs,
             config=config,
             step_limit=args.step_limit,
@@ -377,7 +372,7 @@ Output:
 
     elif args.skill == 'constitutional':
         # Constitutional: single generation from safety standards, then evaluate on all data
-        skill_content = generate_skill(args.skill, args.split, args.dataset_ids, model=get_model_full_name(config))
+        skill_content = generate_skill(args.skill, args.split, dataset_ids, model=get_model_full_name(config))
 
         print("=" * 60)
         print("[2/3] Running RedCode evaluation WITH constitutional skill")
@@ -388,8 +383,8 @@ Output:
             skill_type=args.skill,
             skill_content=skill_content,
             split=args.split,
-            dataset_ids=args.dataset_ids,
-            all_datasets=args.all,
+            dataset_ids=dataset_ids,
+            all_datasets=all_datasets,
             dry_run=args.dry_run,
             step_limit=args.step_limit,
             timeout=args.timeout,
@@ -407,8 +402,8 @@ Output:
             skill_type=args.skill,  # Keep skill_type for context in filename
             skill_content=None,  # No skill injection = baseline
             split=args.split,
-            dataset_ids=args.dataset_ids,
-            all_datasets=args.all,
+            dataset_ids=dataset_ids,
+            all_datasets=all_datasets,
             dry_run=args.dry_run,
             step_limit=args.step_limit,
             timeout=args.timeout,
@@ -428,8 +423,8 @@ Output:
             skill_type=None,
             skill_content=None,
             split=args.split,
-            dataset_ids=args.dataset_ids,
-            all_datasets=args.all,
+            dataset_ids=dataset_ids,
+            all_datasets=all_datasets,
             dry_run=args.dry_run,
             step_limit=args.step_limit,
             timeout=args.timeout,
