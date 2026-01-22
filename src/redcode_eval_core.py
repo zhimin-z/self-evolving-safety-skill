@@ -467,6 +467,44 @@ def save_result(eval_log_json: Dict, resfile: str):
         json.dump(res_records, file, indent=4)
 
 
+def save_trajectory(
+    case_id: str,
+    messages: List,
+    exec_history: List[Dict],
+    traj_dir: str,
+    extra_metadata: Optional[Dict] = None,
+):
+    """Save agent trajectory for a single case.
+
+    Args:
+        case_id: Unique identifier for the case (e.g., "4_1" or "ransomware_file1")
+        messages: Agent conversation messages
+        exec_history: Command execution history
+        traj_dir: Directory to save trajectory files
+        extra_metadata: Optional additional metadata to include
+    """
+    os.makedirs(traj_dir, exist_ok=True)
+
+    # Sanitize case_id for filename
+    safe_case_id = str(case_id).replace("/", "-").replace(" ", "_")
+    traj_file = os.path.join(traj_dir, f"{safe_case_id}.json")
+
+    trajectory = {
+        "case_id": case_id,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+        "messages": messages,
+        "exec_history": exec_history,
+    }
+
+    if extra_metadata:
+        trajectory["metadata"] = extra_metadata
+
+    with open(traj_file, "w", encoding="utf-8") as f:
+        json.dump(trajectory, f, indent=2)
+
+    return traj_file
+
+
 def run_prompt(
     index: str,
     prompt: str,
@@ -574,6 +612,15 @@ def eval_dataset(
 
     start_time = time.time()
 
+    # Create trajectory directory from result file path
+    # resfile: results/exec_4_agent_baseline_model_timestamp.json
+    # traj_dir: trajs/exec_4_agent_baseline_model_timestamp/
+    traj_base = result_base_dir.replace("/results", "/trajs")
+    if traj_base == result_base_dir:
+        traj_base = os.path.join(os.path.dirname(result_base_dir), "trajs")
+    resfile_basename = os.path.basename(resfile).replace(".json", "")
+    traj_dir = os.path.join(traj_base, resfile_basename)
+
     # Evaluate each test case with all prompt types
     for item in data:
         index = item["Index"]
@@ -611,6 +658,22 @@ def eval_dataset(
                     jsonfile, result_base_dir, dry_run
                 )
                 res_prompt_type[input_type].append(prompt_result["result"])
+
+                # Save trajectory for this case + input_type
+                if not dry_run:
+                    case_traj_id = f"{index}_{input_type}"
+                    save_trajectory(
+                        case_id=case_traj_id,
+                        messages=prompt_result.get("messages", []),
+                        exec_history=agent.env.get_history() if hasattr(agent, 'env') else [],
+                        traj_dir=traj_dir,
+                        extra_metadata={
+                            "score": prompt_result["result"],
+                            "input_type": input_type,
+                            "prompt": prompt,
+                            "end_reason": prompt_result.get("end_reason", "unknown"),
+                        },
+                    )
             except Exception as exc:  # pylint: disable=broad-except
                 res_prompt_type[input_type].append(1)
             finally:
@@ -727,7 +790,7 @@ def generate_result_filename(
         model_name: Model name for filename
         skill_type: Skill type (reactive, proactive, constitutional) - context for comparison
         run_idx: Run index for multiple runs
-        is_baseline: If True, this is a baseline run (adds "_baseline" after skill_type)
+        is_baseline: Whether this is a baseline agent
         suffix: Optional suffix before .json
 
     Returns:
@@ -755,6 +818,8 @@ def generate_result_filename(
         parts.append(skill_type)
     if is_baseline:
         parts.append("baseline")
+    else:
+        parts.append("skill")
 
     if run_idx is not None:
         parts.append(f"run{run_idx}")
@@ -1051,6 +1116,16 @@ def eval_gen_category(
     start_time = time.time()
     base_model = None
 
+    # Create trajectory directory from result file path
+    # resfile: results/gen_category_agent_baseline_model_timestamp.json
+    # traj_dir: trajs/gen_category_agent_baseline_model_timestamp/
+    resfile_dir = os.path.dirname(resfile)
+    traj_base = resfile_dir.replace("/results", "/trajs")
+    if traj_base == resfile_dir:
+        traj_base = os.path.join(os.path.dirname(resfile_dir), "trajs")
+    resfile_basename = os.path.basename(resfile).replace(".json", "")
+    traj_dir = os.path.join(traj_base, resfile_basename)
+
     for case in cases:
         case_id = f"{case['category']}_{case['filename']}"
         print(f"  Processing: {case_id}")
@@ -1084,6 +1159,15 @@ def eval_gen_category(
                 "score": score,
                 "status": status,
             })
+
+            # Save trajectory
+            save_trajectory(
+                case_id=case_id,
+                messages=agent.messages,
+                exec_history=exec_history,
+                traj_dir=traj_dir,
+                extra_metadata={"score": score, "status": status, "prompt": prompt},
+            )
 
         except Exception as exc:
             results.append({
@@ -1741,6 +1825,11 @@ def eval_exec_cases(
     os.makedirs(result_base, exist_ok=True)
     start_time = time.time()
 
+    # Create trajectory directory (parallel to results)
+    traj_base = result_base.replace("/results", "/trajs")
+    if traj_base == result_base:
+        traj_base = os.path.join(os.path.dirname(result_base), "trajs")
+
     # Group cases by dataset_id for result organization
     by_dataset: Dict[str, List[Dict]] = defaultdict(list)
     for case in cases:
@@ -1790,6 +1879,20 @@ def eval_exec_cases(
                     "status": status,
                 })
 
+                # Save trajectory
+                traj_subdir = generate_result_filename(
+                    "exec", case["dataset_id"], agent_name, model_name,
+                    skill_type, run_idx, is_baseline=is_baseline, suffix=""
+                ).replace(".json", "")
+                traj_dir = os.path.join(traj_base, traj_subdir)
+                save_trajectory(
+                    case_id=case_id,
+                    messages=agent.messages,
+                    exec_history=exec_history,
+                    traj_dir=traj_dir,
+                    extra_metadata={"score": score, "status": status, "prompt": prompt},
+                )
+
             except Exception as exc:
                 dataset_results.append({
                     "case_id": case_id,
@@ -1814,10 +1917,6 @@ def eval_exec_cases(
     unique_dataset_ids = sorted(set(case["dataset_id"] for case in cases))
 
     eval_log = {
-        "Split": "exec",
-        "Skill": skill_type,
-        "Is Baseline": is_baseline,
-        "Run": run_idx,
         "Agent": agent_name,
         "Model": get_model_full_name(config),
         "Timestamp": timestamp,
@@ -1864,6 +1963,19 @@ def eval_gen_cases(
     os.makedirs(result_base, exist_ok=True)
     start_time = time.time()
 
+    # Create trajectory directory (parallel to results)
+    traj_base = result_base.replace("/results", "/trajs")
+    if traj_base == result_base:
+        traj_base = os.path.join(os.path.dirname(result_base), "trajs")
+
+    # Extract unique dataset_ids for trajectory folder naming
+    unique_dataset_ids = sorted(set(case["dataset_id"] for case in cases))
+    traj_subdir = generate_result_filename(
+        "gen", unique_dataset_ids, agent_name, model_name,
+        skill_type, run_idx, is_baseline=is_baseline, suffix=""
+    ).replace(".json", "")
+    traj_dir = os.path.join(traj_base, traj_subdir)
+
     all_results = []
 
     for case in cases:
@@ -1895,6 +2007,15 @@ def eval_gen_cases(
                 "status": status,
             })
 
+            # Save trajectory
+            save_trajectory(
+                case_id=case_id,
+                messages=agent.messages,
+                exec_history=exec_history,
+                traj_dir=traj_dir,
+                extra_metadata={"score": score, "status": status, "prompt": prompt},
+            )
+
         except Exception as exc:
             all_results.append({
                 "case_id": case_id,
@@ -1917,10 +2038,6 @@ def eval_gen_cases(
     unique_dataset_ids = sorted(set(case["dataset_id"] for case in cases))
 
     eval_log = {
-        "Split": "gen",
-        "Skill": skill_type,
-        "Is Baseline": is_baseline,
-        "Run": run_idx,
         "Agent": agent_name,
         "Model": get_model_full_name(config),
         "Timestamp": timestamp,
