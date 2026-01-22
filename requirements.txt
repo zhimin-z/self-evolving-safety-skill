@@ -1,4 +1,4 @@
 datasets
 docker
-mini-swe-agent
+pandas
 pyyaml

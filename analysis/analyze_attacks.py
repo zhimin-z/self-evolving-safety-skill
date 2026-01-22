@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Analyze RedCode evaluation results and output as JSONL dataframe.
+Analyze RedCode evaluation results and output as CSV dataframe.
 
 Each row contains score frequencies and rates for a unique combination of:
 - agent_name, model_name, redcode_split, skill_type, is_baseline, dataset_id
@@ -10,6 +10,8 @@ Usage:
 """
 
 import json
+
+import pandas as pd
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -222,15 +224,16 @@ def main():
     # Print table
     print_dataframe(rows)
 
-    # Save as JSONL
+    # Save as CSV
     reports_dir.mkdir(parents=True, exist_ok=True)
-    output_path = reports_dir / "analysis_report.jsonl"
+    output_path = reports_dir / "analysis_report.csv"
 
-    with open(output_path, "w") as f:
-        for row in sorted(rows, key=lambda r: (
-            r.agent_name, r.model_name, r.redcode_split, r.skill_type, r.is_baseline, r.dataset_id
-        )):
-            f.write(json.dumps(row.to_dict()) + "\n")
+    sorted_rows = sorted(rows, key=lambda r: (
+        r.agent_name, r.model_name, r.redcode_split, r.skill_type, r.is_baseline, r.dataset_id
+    ))
+
+    df = pd.DataFrame([row.to_dict() for row in sorted_rows])
+    df.to_csv(output_path, index=False)
 
     print(f"\nReport saved to: {output_path}")
 
