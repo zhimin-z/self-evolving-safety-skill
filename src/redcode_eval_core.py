@@ -28,16 +28,10 @@ from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
-
+import fitz  # PyMuPDF for PDF parsing
 import yaml
 import dotenv
 from litellm import completion
-
-try:
-    import fitz  # PyMuPDF for PDF parsing
-    HAS_PYMUPDF = True
-except ImportError:
-    HAS_PYMUPDF = False
 
 # Load environment variables
 dotenv.load_dotenv(override=True)
@@ -1361,9 +1355,6 @@ def load_safety_documents(standards_dir: str) -> List[Dict[str, str]]:
 
         # Handle PDF files
         if suffix == ".pdf":
-            if not HAS_PYMUPDF:
-                print(f"  Warning: Skipping {file_path.name} (PyMuPDF not installed)")
-                continue
             try:
                 doc = fitz.open(file_path)
                 content = ""
