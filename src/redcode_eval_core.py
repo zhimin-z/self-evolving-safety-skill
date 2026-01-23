@@ -33,6 +33,12 @@ import yaml
 import dotenv
 from litellm import completion
 
+try:
+    import fitz  # PyMuPDF for PDF parsing
+    HAS_PYMUPDF = True
+except ImportError:
+    HAS_PYMUPDF = False
+
 # Load environment variables
 dotenv.load_dotenv(override=True)
 
@@ -1351,19 +1357,37 @@ def load_safety_documents(standards_dir: str) -> List[Dict[str, str]]:
         raise FileNotFoundError(f"Safety standards directory not found: {standards_dir}")
 
     for file_path in sorted(p for p in standards_path.rglob("*") if p.is_file()):
-        try:
-            content = file_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            content = file_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
+        suffix = file_path.suffix.lower()
+
+        # Handle PDF files
+        if suffix == ".pdf":
+            if not HAS_PYMUPDF:
+                print(f"  Warning: Skipping {file_path.name} (PyMuPDF not installed)")
+                continue
+            try:
+                doc = fitz.open(file_path)
+                content = ""
+                for page in doc:
+                    content += page.get_text()
+                doc.close()
+            except Exception as e:
+                print(f"  Warning: Failed to parse PDF {file_path.name}: {e}")
+                continue
+        else:
+            # Handle text-based files
+            try:
+                content = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                content = file_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
 
         if not content.strip():
             continue
 
         documents.append({
             "source": file_path.name,
-            "type": file_path.suffix.lstrip(".") or "unknown",
+            "type": suffix.lstrip(".") or "unknown",
             "content": content
         })
 

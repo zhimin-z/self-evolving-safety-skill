@@ -2,3 +2,4 @@ datasets
 docker
 pandas
 pyyaml
+PyMuPDF
