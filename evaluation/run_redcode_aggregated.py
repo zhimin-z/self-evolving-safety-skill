@@ -403,6 +403,7 @@ Output:
             agent_name=agent_name,
             model_name=model_name,
             agent_type=args.agent,
+            filenames=args.filenames,
         )
 
         print("=" * 60)
@@ -422,6 +423,7 @@ Output:
             agent_name=agent_name,
             model_name=model_name,
             agent_type=args.agent,
+            filenames=args.filenames,  # Keep filenames for result filename context
         )
 
     else:
