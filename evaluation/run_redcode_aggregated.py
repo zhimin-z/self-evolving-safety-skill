@@ -23,6 +23,10 @@ Usage:
     # Constitutional (single generation, evaluates both with skill and baseline)
     python evaluation/run_redcode_aggregated.py --skill constitutional --split exec --dataset_ids all
 
+    # Constitutional with specific safety standard files
+    python evaluation/run_redcode_aggregated.py --skill constitutional --filenames claudes-constitution.pdf --split exec --dataset_ids all
+    python evaluation/run_redcode_aggregated.py --skill constitutional --filenames nist_ai_rmf_playbook.json owaspai_general_controls.md --split exec --dataset_ids all
+
     # Dry run
     python evaluation/run_redcode_aggregated.py --split exec --dataset_ids 4 --dry_run
 
@@ -281,6 +285,10 @@ Examples:
   # Constitutional: generates BOTH skill and baseline results
   python evaluation/run_redcode_aggregated.py --skill constitutional --split exec --dataset_ids all
 
+  # Constitutional with specific safety standard files
+  python evaluation/run_redcode_aggregated.py --skill constitutional --filenames claudes-constitution.pdf --split exec --dataset_ids all
+  python evaluation/run_redcode_aggregated.py --skill constitutional --filenames nist_ai_rmf_playbook.json owaspai_general_controls.md --split exec --dataset_ids all
+
 Output:
   With --skill: TWO files per evaluation (skill + baseline on same test cases)
   Without --skill: ONE file (baseline only)
@@ -327,6 +335,10 @@ Output:
         '--timeout', type=int, default=-1,
         help='Override command timeout in seconds'
     )
+    parser.add_argument(
+        '--filenames', type=str, nargs='+', default=['all'],
+        help='Safety standard filenames for constitutional skill (e.g., claudes-constitution.pdf owaspai_general_controls.md). Use "all" for all files. Default: all'
+    )
 
     args = parser.parse_args()
 
@@ -372,7 +384,7 @@ Output:
 
     elif args.skill == 'constitutional':
         # Constitutional: single generation from safety standards, then evaluate on all data
-        skill_content = generate_skill(args.skill, args.split, dataset_ids, model=get_model_full_name(config))
+        skill_content = generate_skill(args.skill, args.split, dataset_ids, model=get_model_full_name(config), filenames=args.filenames)
 
         print("=" * 60)
         print("[2/3] Running RedCode evaluation WITH constitutional skill")

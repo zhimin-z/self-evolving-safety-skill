@@ -1342,15 +1342,27 @@ def load_redcode_datasets_for_generation(
     return all_cases
 
 
-def load_safety_documents(standards_dir: str) -> List[Dict[str, str]]:
-    """Load safety standard documents for constitutional skill generation."""
+def load_safety_documents(standards_dir: str, filenames: Optional[List[str]] = None) -> List[Dict[str, str]]:
+    """Load safety standard documents for constitutional skill generation.
+
+    Args:
+        standards_dir: Directory containing safety standard documents
+        filenames: Optional list of specific filenames to load. Use None or ['all'] to load all files.
+    """
     documents = []
     standards_path = Path(standards_dir)
 
     if not standards_path.exists():
         raise FileNotFoundError(f"Safety standards directory not found: {standards_dir}")
 
+    # Determine if we should filter by specific filenames
+    filter_by_names = filenames is not None and filenames != ['all'] and 'all' not in filenames
+    target_filenames = set(filenames) if filter_by_names else None
+
     for file_path in sorted(p for p in standards_path.rglob("*") if p.is_file()):
+        # Skip if filtering and this file is not in the target list
+        if target_filenames and file_path.name not in target_filenames:
+            continue
         suffix = file_path.suffix.lower()
 
         # Handle PDF files
@@ -1382,7 +1394,17 @@ def load_safety_documents(standards_dir: str) -> List[Dict[str, str]]:
             "content": content
         })
 
-    print(f"  Loaded {len(documents)} safety documents")
+    # Warn about missing files if filtering was requested
+    if target_filenames:
+        loaded_names = {doc["source"] for doc in documents}
+        missing = target_filenames - loaded_names
+        if missing:
+            print(f"  Warning: Requested files not found: {', '.join(sorted(missing))}")
+
+    if target_filenames:
+        print(f"  Loaded {len(documents)} safety documents (filtered from: {', '.join(sorted(target_filenames))})")
+    else:
+        print(f"  Loaded {len(documents)} safety documents (all files)")
     return documents
 
 
@@ -2084,7 +2106,7 @@ def eval_gen_cases(
 # Main Evaluation Functions
 # ============================================================================
 
-def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]], model: Optional[str] = None) -> str:
+def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]], model: Optional[str] = None, filenames: Optional[List[str]] = None) -> str:
     """Generate security skill and return its content.
 
     Args:
@@ -2092,6 +2114,8 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
         split: exec, gen, or all
         dataset_ids: specific dataset IDs
         model: Model to use for generation (uses DEFAULT_MODEL via OpenRouter if not specified)
+        filenames: For constitutional skill, specific filenames from safety_standards folder.
+                   Use None or ['all'] to use all files. Default: None (all files)
 
     Returns:
         Generated skill content
@@ -2107,9 +2131,11 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
         # Constitutional: Generate from safety standards
         standards_dir = os.path.join(REPO_ROOT, "safety_standards")
         print(f"\nLoading safety standard documents from: {standards_dir}")
+        if filenames and filenames != ['all'] and 'all' not in filenames:
+            print(f"  Filtering by filenames: {', '.join(filenames)}")
 
         try:
-            documents = load_safety_documents(standards_dir)
+            documents = load_safety_documents(standards_dir, filenames=filenames)
         except FileNotFoundError as e:
             print(f"Error: {e}")
             print(f"\nCreate the directory and add safety documents:")
