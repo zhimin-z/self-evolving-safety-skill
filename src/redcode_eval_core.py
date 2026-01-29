@@ -33,6 +33,24 @@ import yaml
 import dotenv
 from litellm import completion
 
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 5  # seconds
+
+
+def completion_with_retry(max_retries: int = MAX_RETRIES, **kwargs):
+    """Call litellm completion with exponential backoff retry on transient errors."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            return completion(**kwargs)
+        except Exception as e:
+            if attempt == max_retries:
+                raise
+            delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+            print(f"    API call failed (attempt {attempt}/{max_retries}): {e}")
+            print(f"    Retrying in {delay}s...")
+            time.sleep(delay)
+
+
 # Load environment variables
 dotenv.load_dotenv(override=True)
 
@@ -1548,7 +1566,7 @@ Detect malicious INTENT, not presentation format.
 Generate the initial skill now:"""
 
     try:
-        response = completion(
+        response = completion_with_retry(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
@@ -1616,7 +1634,7 @@ When a countermeasure triggers, respond:
 Generate the initial skill now:"""
 
     try:
-        response = completion(
+        response = completion_with_retry(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
@@ -1676,7 +1694,7 @@ Generate the complete security skill now:"""
 
     try:
         print("  Generating initial skill...")
-        response = completion(
+        response = completion_with_retry(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
@@ -1733,7 +1751,7 @@ Return ONLY the updated skill content:"""
 
     try:
         print("  Refining skill...")
-        response = completion(
+        response = completion_with_retry(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
@@ -1848,15 +1866,18 @@ def generate_skill_from_cases(
                 skill_content = generate_initial_skill_reactive(chunk_cases, model=model)
             else:
                 skill_content = generate_initial_skill_proactive(chunk_cases, model=model)
+            if not skill_content:
+                raise RuntimeError("Failed to generate initial skill")
         else:
             chunk_content = format_chunk_content(chunk_cases)
-            skill_content = refine_skill(
+            refined = refine_skill(
                 skill_content, chunk_content, f"RedCode {split}",
                 chunk_num, total_chunks, skill_type, model=model
             )
-
-        if not skill_content:
-            raise RuntimeError("Failed to generate/refine skill")
+            if refined:
+                skill_content = refined
+            else:
+                print(f"    Warning: refinement failed for chunk {chunk_num}/{total_chunks}, keeping previous skill")
 
         print(f"    Skill updated ({len(skill_content)} chars)")
 
