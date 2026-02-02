@@ -605,6 +605,14 @@ def eval_dataset(
     result_base_dir: str,
     dry_run: bool,
     case_limit: int = -1,
+    agent_name: str = None,
+    model_full_name: str = None,
+    skill_type: str = None,
+    skill_mode=None,
+    is_baseline: bool = False,
+    run_idx: int = 1,
+    step_limit: int = -1,
+    timeout: int = -1,
 ):
     """Evaluate agent on a single RedCode dataset with per-attack isolation.
 
@@ -617,6 +625,14 @@ def eval_dataset(
         result_base_dir: Base directory for evaluation outputs
         dry_run: If True, skip actual execution
         case_limit: Limit number of test cases (<=0 for all)
+        agent_name: Name of the agent (for result metadata)
+        model_full_name: Full model name (for result metadata)
+        skill_type: Skill type being evaluated (for result metadata)
+        skill_mode: "aggregate"/"separate" or list of filenames (for result metadata)
+        is_baseline: Whether this is a baseline run (for result metadata)
+        run_idx: Run index (for result metadata)
+        step_limit: Agent step limit (for result metadata)
+        timeout: Command timeout (for result metadata)
     """
     # Load dataset
     with open(jsonfile, "r", encoding="utf-8") as file:
@@ -626,6 +642,7 @@ def eval_dataset(
 
     all_input_types = ["code_input", "code_input_jailbreaking", "text_summary", "text_details"]
     res_prompt_type = {input_type: [] for input_type in all_input_types}
+    all_results = []  # Individual case results for aligned format
     base_model = None
 
     start_time = time.time()
@@ -675,7 +692,17 @@ def eval_dataset(
                     index, prompt, input_type, agent, container,
                     jsonfile, result_base_dir, dry_run
                 )
-                res_prompt_type[input_type].append(prompt_result["result"])
+                score = prompt_result["result"]
+                res_prompt_type[input_type].append(score)
+                end_reason = prompt_result.get("end_reason", "unknown")
+
+                all_results.append({
+                    "case_id": f"{dataset_id}_{index}_{input_type}",
+                    "index": index,
+                    "input_type": input_type,
+                    "score": score,
+                    "status": end_reason,
+                })
 
                 # Save trajectory for this case + input_type
                 if not dry_run:
@@ -686,14 +713,21 @@ def eval_dataset(
                         exec_history=agent.env.get_history() if hasattr(agent, 'env') else [],
                         traj_dir=traj_dir,
                         extra_metadata={
-                            "score": prompt_result["result"],
+                            "score": score,
                             "input_type": input_type,
                             "prompt": prompt,
-                            "end_reason": prompt_result.get("end_reason", "unknown"),
+                            "end_reason": end_reason,
                         },
                     )
             except Exception as exc:  # pylint: disable=broad-except
                 res_prompt_type[input_type].append(1)
+                all_results.append({
+                    "case_id": f"{dataset_id}_{index}_{input_type}",
+                    "index": index,
+                    "input_type": input_type,
+                    "score": 1,
+                    "error": str(exc),
+                })
             finally:
                 # Clean up container after each attack
                 container.close()
@@ -703,23 +737,46 @@ def eval_dataset(
     duration = time.time() - start_time
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    # Compile final results
-    eval_log_json = {
-        "Index": dataset_id,
-        "Jsonfile": jsonfile,
-        "Task": "python_eval",
-        "Base Model": base_model or "unknown",
+    # Compute overall score distribution across all evaluations
+    all_scores = [r['score'] for r in all_results]
+    score_dist = dict(Counter(all_scores))
+
+    # Compile final results (unified format across all skill types)
+    eval_log = {
+        "Agent": agent_name,
+        "Model": model_full_name or base_model or "unknown",
+        "Skill Type": skill_type,
+        "Skill Mode": skill_mode,
+        "Is Baseline": is_baseline,
+        "Run Index": run_idx,
         "Timestamp": timestamp,
         "Duration (seconds)": round(duration, 2),
-        "Final Result": {
+        "Config": {
+            "step_limit": step_limit,
+            "timeout": timeout,
+            "dry_run": dry_run,
+        },
+        "Split": "exec",
+        "Dataset IDs": [dataset_id],
+
+        "Total Cases": len(all_results),
+        "Score Distribution": score_dist,
+        "Refusal Rate (score=0)": all_scores.count(0) / len(all_scores) if all_scores else 0,
+        "Attack Success Rate (score=3)": all_scores.count(3) / len(all_scores) if all_scores else 0,
+        "Score Distribution by Prompt Type": {
             "Code": dict(Counter(res_prompt_type["code_input"])),
             "Code w/ jb": dict(Counter(res_prompt_type["code_input_jailbreaking"])),
             "Summary": dict(Counter(res_prompt_type["text_summary"])),
             "Details": dict(Counter(res_prompt_type["text_details"])),
         },
+        "Results": all_results,
     }
 
-    save_result(eval_log_json, resfile)
+    os.makedirs(os.path.dirname(resfile), exist_ok=True)
+    with open(resfile, "w", encoding="utf-8") as f:
+        json.dump(eval_log, f, indent=2)
+
+    print(f"\n  Results saved to: {resfile}")
 
 
 def load_evolved_tools(agent_dir: str, container: Container, repo_root: str) -> List[str]:
@@ -789,17 +846,33 @@ def get_agent_name(config_path: str) -> str:
     return basename
 
 
+def _skill_mode_suffix(skill_mode) -> str:
+    """Convert skill_mode to a filename-safe suffix string.
+
+    Args:
+        skill_mode: "aggregate", "separate", or list of filenames like ["owaspai.md"]
+
+    Returns:
+        e.g. "aggregate", "separate", "owaspai-nist_ai_rmf_playbook"
+    """
+    if isinstance(skill_mode, list):
+        if skill_mode == ['all'] or 'all' in skill_mode:
+            return "all"
+        sanitized = [Path(f).stem for f in skill_mode]
+        return "-".join(sanitized)
+    return str(skill_mode)
+
+
 def generate_result_filename(
     split: str,
     dataset_ids: Any,  # str or List[str]
     agent_name: str,
     model_name: str,
-    skill_type: Optional[str] = None,
-    run_idx: Optional[int] = None,
+    skill_type: str,
+    run_idx: int,
     is_baseline: bool = False,
     suffix: str = "",
-    filenames: Optional[List[str]] = None,
-    mode: Optional[str] = None,
+    skill_mode=None,  # "aggregate", "separate", or ["file.md", ...]
 ) -> str:
     """Generate a descriptive result filename.
 
@@ -808,17 +881,17 @@ def generate_result_filename(
         dataset_ids: Single dataset ID (str) or list of dataset IDs
         agent_name: Agent name for filename
         model_name: Model name for filename
-        skill_type: Skill type (reactive, proactive, constitutional) - context for comparison
-        run_idx: Run index for multiple runs
+        skill_type: Skill type (reactive, proactive, constitutional)
+        run_idx: Run index (always present)
         is_baseline: Whether this is a baseline agent
         suffix: Optional suffix before .json
-        filenames: For constitutional skill, the safety standard filenames used
-        mode: aggregate or separate (for reactive/proactive)
+        skill_mode: "aggregate"/"separate" for reactive/proactive,
+                    list of filenames for constitutional
 
     Returns:
-        Filename like: exec_1-2-3_agent_reactive-aggregate_baseline_model_timestamp.json
-                   or: exec_4_agent_proactive-separate_run1_model_timestamp.json
-                   or: exec_4_agent_constitutional-nist-owasp_skill_model_timestamp.json
+        Filename like: exec_1-2-3_agent_reactive-aggregate_baseline_run1_model_timestamp.json
+                   or: exec_4_agent_proactive-separate_skill_run1_model_timestamp.json
+                   or: exec_4_agent_constitutional-nist-owasp_skill_run1_model_timestamp.json
     """
     time_now = datetime.datetime.now()
     time_stamp = time_now.strftime("%Y-%m-%d_%H-%M-%S")
@@ -836,24 +909,14 @@ def generate_result_filename(
 
     parts = [split, dataset_str, agent_clean]
 
-    # Add skill_type context (with mode suffix for reactive/proactive, filenames for constitutional)
-    if skill_type:
-        if skill_type == "constitutional" and filenames and filenames != ['all'] and 'all' not in filenames:
-            # Include sanitized filenames for constitutional skill differentiation
-            sanitized = [Path(f).stem for f in filenames]
-            parts.append(f"{skill_type}-{'-'.join(sanitized)}")
-        elif mode:
-            parts.append(f"{skill_type}-{mode}")
-        else:
-            parts.append(skill_type)
-
-    if is_baseline:
-        parts.append("baseline")
+    # Add skill_type with skill_mode suffix
+    if skill_mode is not None:
+        parts.append(f"{skill_type}-{_skill_mode_suffix(skill_mode)}")
     else:
-        parts.append("skill")
+        parts.append(skill_type)
 
-    if run_idx is not None:
-        parts.append(f"run{run_idx}")
+    parts.append("baseline" if is_baseline else "skill")
+    parts.append(f"run{run_idx}")
     parts.extend([model_clean, time_stamp])
 
     return "_".join(parts) + suffix + ".json"
@@ -1178,6 +1241,14 @@ def eval_gen_category(
     agent_factory: Callable,
     resfile: str,
     dry_run: bool,
+    agent_name: str = None,
+    model_full_name: str = None,
+    skill_type: str = None,
+    skill_mode=None,
+    is_baseline: bool = False,
+    run_idx: int = 1,
+    step_limit: int = -1,
+    timeout: int = -1,
 ):
     """Evaluate agent on RedCode-Gen category (malware code generation)."""
     results = []
@@ -1255,11 +1326,22 @@ def eval_gen_category(
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     eval_log = {
-        "Category": category,
-        "Task": "code_generation",
-        "Model": base_model or "unknown",
+        "Agent": agent_name,
+        "Model": model_full_name or base_model or "unknown",
+        "Skill Type": skill_type,
+        "Skill Mode": skill_mode,
+        "Is Baseline": is_baseline,
+        "Run Index": run_idx,
         "Timestamp": timestamp,
         "Duration (seconds)": round(duration, 2),
+        "Config": {
+            "step_limit": step_limit,
+            "timeout": timeout,
+            "dry_run": dry_run,
+        },
+        "Split": "gen",
+        "Dataset IDs": [category],
+
         "Total Cases": len(cases),
         "Score Distribution": score_dist,
         "Refusal Rate (score=0)": scores.count(0) / len(scores) if scores else 0,
@@ -1833,37 +1915,29 @@ def generate_skill_filename(
     split: Optional[str] = None,
     dataset_ids: Optional[List[str]] = None,
     run_idx: Optional[int] = None,
-    filenames: Optional[List[str]] = None,
-    mode: Optional[str] = None,
+    skill_mode=None,  # "aggregate", "separate", or ["file.md", ...]
 ) -> str:
     """Generate a descriptive skill filename.
 
-    Format: {skill_type}_{mode}_{split}_{dataset_ids}_run{N}.md
-    Example: reactive_aggregate_exec_1-2-3_run1.md, proactive_separate_exec_4_run3.md
-
-    For constitutional skills with filenames (mode not applicable):
-    Format: {skill_type}_{sanitized_filenames}.md
-    Example: constitutional_claudes-constitution-nist_ai_rmf_playbook.md
+    Format: {skill_type}_{skill_mode_suffix}_{split}_{dataset_ids}_run{N}.md
+    Examples:
+        reactive_aggregate_exec_1-2-3_run1.md
+        proactive_separate_exec_4_run3.md
+        constitutional_owaspai-nist_ai_rmf_playbook_run1.md
     """
     parts = [skill_type]
 
-    if mode:
-        parts.append(mode)
+    if skill_mode is not None:
+        parts.append(_skill_mode_suffix(skill_mode))
 
     if split:
         parts.append(split)
 
     if dataset_ids:
-        parts.append("-".join(dataset_ids))
+        parts.append("-".join(str(d) for d in dataset_ids))
 
     if run_idx is not None:
         parts.append(f"run{run_idx}")
-
-    # For constitutional skills, include sanitized filenames (without extensions)
-    if filenames and filenames != ['all'] and 'all' not in filenames:
-        # Remove file extensions and join with hyphens
-        sanitized = [Path(f).stem for f in filenames]
-        parts.append("-".join(sanitized))
 
     return "_".join(parts) + ".md"
 
@@ -1875,14 +1949,13 @@ def save_skill(
     split: Optional[str] = None,
     dataset_ids: Optional[List[str]] = None,
     run_idx: Optional[int] = None,
-    filenames: Optional[List[str]] = None,
-    mode: Optional[str] = None,
+    skill_mode=None,
 ):
     """Save generated skill to output directory."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    filename = generate_skill_filename(skill_type, split, dataset_ids, run_idx, filenames, mode=mode)
+    filename = generate_skill_filename(skill_type, split, dataset_ids, run_idx, skill_mode=skill_mode)
     skill_file = output_path / filename
 
     with open(skill_file, "w") as f:
@@ -1903,7 +1976,7 @@ def generate_skill_from_cases(
     dataset_ids: Optional[List[str]] = None,
     run_idx: Optional[int] = None,
     model: Optional[str] = None,
-    mode: Optional[str] = None,
+    skill_mode=None,
 ) -> str:
     """Generate security skill from provided cases (reactive/proactive only).
 
@@ -1915,7 +1988,7 @@ def generate_skill_from_cases(
         dataset_ids: Original dataset IDs (for filename)
         run_idx: Run index (for filename)
         model: Model to use for generation (uses DEFAULT_MODEL via OpenRouter if not specified)
-        mode: aggregate or separate (for filename)
+        skill_mode: "aggregate" or "separate"
 
     Returns:
         Generated skill content
@@ -1953,7 +2026,7 @@ def generate_skill_from_cases(
 
         print(f"    Skill updated ({len(skill_content)} chars)")
 
-    save_skill(skill_content, skill_type, output_dir, split, dataset_ids, run_idx, mode=mode)
+    save_skill(skill_content, skill_type, output_dir, split, dataset_ids, run_idx, skill_mode=skill_mode)
     return skill_content
 
 
@@ -1971,8 +2044,7 @@ def eval_exec_cases(
     dry_run: bool,
     agent_type: str = "mini",
     is_baseline: bool = False,
-    filenames: Optional[List[str]] = None,
-    mode: Optional[str] = None,
+    skill_mode=None,
 ):
     """Evaluate agent on specific RedCode-Exec cases."""
     os.makedirs(result_base, exist_ok=True)
@@ -2036,7 +2108,7 @@ def eval_exec_cases(
                 traj_subdir = generate_result_filename(
                     "exec", case["dataset_id"], agent_name, model_name,
                     skill_type, run_idx, is_baseline=is_baseline, suffix="",
-                    filenames=filenames
+                    skill_mode=skill_mode
                 ).replace(".json", "")
                 traj_dir = os.path.join(traj_base, traj_subdir)
                 save_trajectory(
@@ -2074,9 +2146,9 @@ def eval_exec_cases(
         "Agent": agent_name,
         "Model": get_model_full_name(config),
         "Skill Type": skill_type,
-        "Mode": mode,
-        "Skill Filenames": filenames if filenames and filenames != ['all'] and 'all' not in filenames else None,
+        "Skill Mode": skill_mode,
         "Is Baseline": is_baseline,
+        "Run Index": run_idx,
         "Timestamp": timestamp,
         "Duration (seconds)": round(duration, 2),
         "Config": {
@@ -2084,6 +2156,8 @@ def eval_exec_cases(
             "timeout": timeout,
             "dry_run": dry_run,
         },
+        "Split": "exec",
+        "Dataset IDs": unique_dataset_ids,
         "Total Cases": len(cases),
         "Score Distribution": score_dist,
         "Refusal Rate (score=0)": scores.count(0) / len(scores) if scores else 0,
@@ -2093,7 +2167,7 @@ def eval_exec_cases(
 
     resfile = os.path.join(result_base, generate_result_filename(
         "exec", unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
-        is_baseline=is_baseline, filenames=filenames, mode=mode
+        is_baseline=is_baseline, skill_mode=skill_mode
     ))
 
     with open(resfile, "w") as f:
@@ -2117,8 +2191,7 @@ def eval_gen_cases(
     dry_run: bool,
     agent_type: str = "mini",
     is_baseline: bool = False,
-    filenames: Optional[List[str]] = None,
-    mode: Optional[str] = None,
+    skill_mode=None,
 ):
     """Evaluate agent on specific RedCode-Gen cases."""
     os.makedirs(result_base, exist_ok=True)
@@ -2134,7 +2207,7 @@ def eval_gen_cases(
     traj_subdir = generate_result_filename(
         "gen", unique_dataset_ids, agent_name, model_name,
         skill_type, run_idx, is_baseline=is_baseline, suffix="",
-        filenames=filenames
+        skill_mode=skill_mode
     ).replace(".json", "")
     traj_dir = os.path.join(traj_base, traj_subdir)
 
@@ -2203,9 +2276,9 @@ def eval_gen_cases(
         "Agent": agent_name,
         "Model": get_model_full_name(config),
         "Skill Type": skill_type,
-        "Mode": mode,
-        "Skill Filenames": filenames if filenames and filenames != ['all'] and 'all' not in filenames else None,
+        "Skill Mode": skill_mode,
         "Is Baseline": is_baseline,
+        "Run Index": run_idx,
         "Timestamp": timestamp,
         "Duration (seconds)": round(duration, 2),
         "Config": {
@@ -2213,6 +2286,8 @@ def eval_gen_cases(
             "timeout": timeout,
             "dry_run": dry_run,
         },
+        "Split": "gen",
+        "Dataset IDs": unique_dataset_ids,
         "Total Cases": len(cases),
         "Score Distribution": score_dist,
         "Refusal Rate (score=0)": scores.count(0) / len(scores) if scores else 0,
@@ -2222,7 +2297,7 @@ def eval_gen_cases(
 
     resfile = os.path.join(result_base, generate_result_filename(
         "gen", unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
-        is_baseline=is_baseline, filenames=filenames, mode=mode
+        is_baseline=is_baseline, skill_mode=skill_mode
     ))
 
     with open(resfile, "w") as f:
@@ -2236,7 +2311,7 @@ def eval_gen_cases(
 # Main Evaluation Functions
 # ============================================================================
 
-def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]], model: Optional[str] = None, filenames: Optional[List[str]] = None) -> str:
+def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]], model: Optional[str] = None, skill_mode=None, run_idx: int = 1) -> str:
     """Generate security skill and return its content.
 
     Args:
@@ -2244,8 +2319,8 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
         split: exec, gen, or all
         dataset_ids: specific dataset IDs
         model: Model to use for generation (uses DEFAULT_MODEL via OpenRouter if not specified)
-        filenames: For constitutional skill, specific filenames from safety_standards folder.
-                   Use None or ['all'] to use all files. Default: None (all files)
+        skill_mode: "aggregate"/"separate" for reactive/proactive, list of filenames for constitutional
+        run_idx: Run index for skill filename
 
     Returns:
         Generated skill content
@@ -2256,6 +2331,9 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
     print("=" * 60)
     print(f"[1/2] Generating {skill_type} skill")
     print("=" * 60)
+
+    # For constitutional, skill_mode is the list of filenames
+    filenames = skill_mode if isinstance(skill_mode, list) else None
 
     if skill_type == "constitutional":
         # Constitutional: Generate from safety standards
@@ -2293,7 +2371,7 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
                     print("Error: Failed to generate/refine skill")
                     sys.exit(1)
 
-        save_skill(skill_content, skill_type, output_dir, filenames=filenames)
+        save_skill(skill_content, skill_type, output_dir, run_idx=run_idx, skill_mode=skill_mode)
 
     else:
         # Reactive/Proactive: Generate from RedCode attacks
@@ -2340,7 +2418,7 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
 
             print(f"  Skill updated ({len(skill_content)} chars)")
 
-        save_skill(skill_content, skill_type, output_dir, split, dataset_ids)
+        save_skill(skill_content, skill_type, output_dir, split, dataset_ids, run_idx=run_idx, skill_mode=skill_mode)
 
     print(f"Skill generation complete!\n")
     return skill_content
@@ -2348,7 +2426,7 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
 
 def run_evaluation(
     config: dict,
-    skill_type: Optional[str],
+    skill_type: str,
     skill_content: Optional[str],
     split: str,
     dataset_ids: Optional[List[str]],
@@ -2359,7 +2437,8 @@ def run_evaluation(
     agent_name: str,
     model_name: str,
     agent_type: str = "mini",
-    filenames: Optional[List[str]] = None,
+    skill_mode=None,
+    run_idx: int = 1,
 ):
     """Run RedCode evaluation."""
     import copy
@@ -2425,8 +2504,8 @@ def run_evaluation(
         print(f"{'='*60}\n")
 
         resfile = os.path.join(result_base, generate_result_filename(
-            "exec", dataset_id, agent_name, model_name, skill_type,
-            is_baseline=is_baseline, filenames=filenames
+            "exec", dataset_id, agent_name, model_name, skill_type, run_idx,
+            is_baseline=is_baseline, skill_mode=skill_mode
         ))
 
         if dry_run:
@@ -2450,6 +2529,14 @@ def run_evaluation(
             resfile=resfile,
             result_base_dir=result_base,
             dry_run=dry_run,
+            agent_name=agent_name,
+            model_full_name=get_model_full_name(config),
+            skill_type=skill_type,
+            skill_mode=skill_mode,
+            is_baseline=is_baseline,
+            run_idx=run_idx,
+            step_limit=step_limit,
+            timeout=timeout,
         )
 
         print(f"\n[RedCode-Exec] Dataset {dataset_id} complete!")
@@ -2473,8 +2560,8 @@ def run_evaluation(
         print(f"{'='*60}\n")
 
         resfile = os.path.join(result_base, generate_result_filename(
-            "gen", category, agent_name, model_name, skill_type,
-            is_baseline=is_baseline, filenames=filenames
+            "gen", category, agent_name, model_name, skill_type, run_idx,
+            is_baseline=is_baseline, skill_mode=skill_mode
         ))
 
         if dry_run:
@@ -2496,6 +2583,14 @@ def run_evaluation(
             agent_factory=create_agent,
             resfile=resfile,
             dry_run=dry_run,
+            agent_name=agent_name,
+            model_full_name=get_model_full_name(config),
+            skill_type=skill_type,
+            skill_mode=skill_mode,
+            is_baseline=is_baseline,
+            run_idx=run_idx,
+            step_limit=step_limit,
+            timeout=timeout,
         )
 
         print(f"\n[RedCode-Gen] Category {category} complete!")
