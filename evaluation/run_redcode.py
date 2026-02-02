@@ -2,11 +2,9 @@
 """
 RedCode evaluation script with optional skill generation.
 
-Supports two modes for reactive/proactive skill evaluation:
-- aggregate: Pool all datasets, split 50/50 globally, generate one skill from train pool
-- separate: Per-dataset skill generation + evaluation with independent splits
-
-Constitutional skills and baseline evaluation are mode-independent.
+The --mode flag is the variant selector for all skill types:
+- reactive/proactive: "aggregate" or "separate"
+- constitutional: safety standard filenames or "all" (default, expands to all standards)
 
 Usage:
     # Baseline evaluation only (no skill, no mode needed)
@@ -21,20 +19,13 @@ Usage:
     python evaluation/run_redcode.py --skill reactive --mode separate --split exec --dataset_ids 1 2 3 --n_runs 5
     python evaluation/run_redcode.py --skill proactive --mode separate --split exec --dataset_ids 4 --n_runs 5
 
-    # Constitutional (--mode is ignored)
+    # Constitutional (--mode selects safety standards; default "all")
     python evaluation/run_redcode.py --skill constitutional --split exec --dataset_ids all
-    python evaluation/run_redcode.py --skill constitutional --filenames claudes-constitution.pdf --split exec --dataset_ids all
-    python evaluation/run_redcode.py --skill constitutional --filenames nist_ai_rmf_playbook.json owaspai_general_controls.md --split exec --dataset_ids all
+    python evaluation/run_redcode.py --skill constitutional --mode owaspai_general_controls.md --split exec --dataset_ids all
+    python evaluation/run_redcode.py --skill constitutional --mode nist_ai_rmf_playbook.json owaspai_general_controls.md --split exec --dataset_ids all
 
     # Dry run
     python evaluation/run_redcode.py --split exec --dataset_ids 4 --dry_run
-
-Output Files (all in results/ folder):
-    With skill specified:
-      - results/exec_4_agent_reactive_skill_run1_model_timestamp.json  (with skill)
-      - results/exec_4_agent_reactive_baseline_run1_model_timestamp.json  (baseline)
-    Without skill:
-      - results/exec_4_agent_baseline_model_timestamp.json
 """
 
 import argparse
@@ -71,6 +62,7 @@ from redcode_eval_core import (
     filter_failed_cases_from_baseline,
     load_redcode_datasets_for_generation,
     _skill_mode_suffix,
+    resolve_constitutional_mode,
     # Skill generation
     generate_skill_filename,
     generate_skill_from_cases,
@@ -88,13 +80,13 @@ from redcode_eval_core import (
 # Skill Checkpoint
 # ============================================================================
 
-def _check_skill_checkpoint(output_dir, skill_type, split=None, dataset_ids=None, run_idx=None, skill_mode=None):
+def _check_skill_checkpoint(output_dir, skill_type, split=None, dataset_ids=None, run_idx=None, skill_mode=None, model_name="", agent_type=""):
     """Check if a skill file already exists and return its content if so.
 
     This avoids expensive re-generation of skills that have already been created.
     The filename is computed using the same logic as save_skill() to ensure exact match.
     """
-    filename = generate_skill_filename(skill_type, split, dataset_ids, run_idx, skill_mode=skill_mode)
+    filename = generate_skill_filename(skill_type, split, dataset_ids, run_idx, skill_mode=skill_mode, model_name=model_name, agent_type=agent_type)
     skill_path = os.path.join(output_dir, filename)
     if os.path.exists(skill_path):
         with open(skill_path, "r") as f:
@@ -194,7 +186,7 @@ def run_aggregate_experiment(
         # Check for existing skill checkpoint (avoids expensive regeneration)
         cached_skill = _check_skill_checkpoint(
             output_dir, skill_type, split, all_dataset_ids,
-            run_idx, skill_mode="aggregate"
+            run_idx, skill_mode="aggregate", model_name=model_name, agent_type=agent_type
         )
 
         if cached_skill is not None:
@@ -275,6 +267,7 @@ def run_aggregate_experiment(
                     run_idx=run_idx,
                     model=get_model_full_name(config),
                     skill_mode="aggregate",
+                    agent_type=agent_type,
                 )
         else:
             # PROACTIVE: Generate skill from ALL train cases (no baseline needed)
@@ -287,6 +280,7 @@ def run_aggregate_experiment(
                 run_idx=run_idx,
                 model=get_model_full_name(config),
                 skill_mode="aggregate",
+                agent_type=agent_type,
             )
 
         # Inject skill into config (if skill was generated)
@@ -486,7 +480,7 @@ def run_separate_experiment(
             # Check for existing skill checkpoint (avoids expensive regeneration)
             cached_skill = _check_skill_checkpoint(
                 output_dir, skill_type, dataset_split, [dataset_id],
-                local_run_idx, skill_mode="separate"
+                local_run_idx, skill_mode="separate", model_name=model_name, agent_type=agent_type
             )
 
             if cached_skill is not None:
@@ -559,6 +553,7 @@ def run_separate_experiment(
                         run_idx=local_run_idx,
                         model=get_model_full_name(config),
                         skill_mode="separate",
+                        agent_type=agent_type,
                     )
             else:
                 # PROACTIVE: use all train cases
@@ -571,6 +566,7 @@ def run_separate_experiment(
                     run_idx=local_run_idx,
                     model=get_model_full_name(config),
                     skill_mode="separate",
+                    agent_type=agent_type,
                 )
 
             # Inject skill into config (if skill was generated)
@@ -700,8 +696,8 @@ Examples:
   python evaluation/run_redcode.py --skill reactive --mode separate --split exec --dataset_ids 1 2 3 --n_runs 5
   python evaluation/run_redcode.py --skill proactive --mode separate --split all --dataset_ids all --n_runs 3
 
-  # Constitutional (--mode specifies safety standard filenames)
-  python evaluation/run_redcode.py --skill constitutional --mode all --split exec --dataset_ids all
+  # Constitutional (--mode selects safety standards; default "all" expands to all files)
+  python evaluation/run_redcode.py --skill constitutional --split exec --dataset_ids all
   python evaluation/run_redcode.py --skill constitutional --mode owaspai_general_controls.md --split exec --dataset_ids all
   python evaluation/run_redcode.py --skill constitutional --mode owaspai_general_controls.md nist_ai_rmf_playbook.json --split exec --dataset_ids all --n_runs 3
 
@@ -728,8 +724,8 @@ Output:
     )
     parser.add_argument(
         '--mode', type=str, nargs='+', default=None,
-        help='Skill mode. For reactive/proactive: "aggregate" or "separate". '
-             'For constitutional: safety standard filenames or "all". '
+        help='Skill mode variant. For reactive/proactive: "aggregate" or "separate". '
+             'For constitutional: safety standard filenames or "all" (expands to all standards). '
              'Default: "aggregate" for reactive/proactive, "all" for constitutional.'
     )
     parser.add_argument(
@@ -769,8 +765,9 @@ Output:
             parser.error("--mode must be 'aggregate' or 'separate' for reactive/proactive skills")
         skill_mode = mode_raw[0]  # str: "aggregate" or "separate"
     else:
-        # Constitutional: mode is the list of filenames
-        skill_mode = args.mode or ['all']  # list: ["all"] or ["owaspai.md", ...]
+        # Constitutional: mode is list of safety standard filenames.
+        # Resolve "all" to the actual sorted list so naming is consistent.
+        skill_mode = resolve_constitutional_mode(args.mode or ['all'])
 
     # Check if "all" was specified
     all_datasets = 'all' in args.dataset_ids
@@ -826,11 +823,11 @@ Output:
                 print(f"[Run {run_idx}/{args.n_runs}]")
                 print(f"{'='*60}")
 
-            cached_skill = _check_skill_checkpoint(output_dir, args.skill, run_idx=run_idx, skill_mode=skill_mode)
+            cached_skill = _check_skill_checkpoint(output_dir, args.skill, run_idx=run_idx, skill_mode=skill_mode, model_name=get_model_full_name(config), agent_type=args.agent)
             if cached_skill is not None:
                 skill_content = cached_skill
             else:
-                skill_content = generate_skill(args.skill, args.split, dataset_ids, model=get_model_full_name(config), skill_mode=skill_mode, run_idx=run_idx)
+                skill_content = generate_skill(args.skill, args.split, dataset_ids, model=get_model_full_name(config), skill_mode=skill_mode, run_idx=run_idx, agent_type=args.agent)
 
             print("=" * 60)
             print(f"Running RedCode evaluation WITH constitutional skill (run {run_idx})")

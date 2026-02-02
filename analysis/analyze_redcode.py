@@ -3,10 +3,12 @@
 Analyze RedCode evaluation results and output as CSV dataframe.
 
 Each row contains score frequencies and rates for a unique combination of:
-- agent_name, model_name, redcode_split, skill_type, skill_filenames, is_baseline, dataset_id
+- agent_name, model_name, redcode_split, skill_type, mode, is_baseline, dataset_id
 
-For constitutional skills, skill_filenames differentiates between different safety
-standard configurations (e.g., "claudes-constitution" vs "nist_ai_rmf_playbook-owaspai_general_controls").
+The mode field is the unified variant identifier for all skill types:
+- reactive/proactive: "aggregate" or "separate"
+- constitutional: safety standard stems joined by hyphens
+  (e.g., "claudes-constitution-nist_ai_rmf_playbook-owaspai_general_controls")
 
 Usage:
     python analysis/analyze_attacks.py
@@ -28,8 +30,7 @@ class DataFrameRow:
     model_name: str
     redcode_split: str
     skill_type: str
-    mode: str  # "aggregate", "separate", or "" (for constitutional/baseline)
-    skill_filenames: str  # Sanitized filenames for constitutional skills, empty for others
+    mode: str  # "aggregate", "separate", or constitutional standard stems
     is_baseline: str  # "yes" or "no"
     dataset_id: str
     score_0: int
@@ -45,7 +46,6 @@ class DataFrameRow:
             "redcode_split": self.redcode_split,
             "skill_type": self.skill_type,
             "mode": self.mode,
-            "skill_filenames": self.skill_filenames,
             "is_baseline": self.is_baseline,
             "dataset_id": self.dataset_id,
             "score_0": self.score_0,
@@ -58,7 +58,7 @@ class DataFrameRow:
 
 def load_and_process_results(results_dir: Path) -> List[DataFrameRow]:
     """Load all result files and aggregate by unique key."""
-    # Key: (agent, model, split, skill, mode, skill_filenames, is_baseline, dataset_id)
+    # Key: (agent, model, split, skill, mode, is_baseline, dataset_id)
     # Value: {score_0, score_1, score_3}
     aggregated: Dict[tuple, Dict[str, int]] = defaultdict(
         lambda: {"score_0": 0, "score_1": 0, "score_3": 0}
@@ -80,7 +80,7 @@ def load_and_process_results(results_dir: Path) -> List[DataFrameRow]:
     # Convert aggregated data to rows
     rows = []
     for key, scores in aggregated.items():
-        agent, model, split, skill, mode, skill_filenames, is_baseline, dataset_id = key
+        agent, model, split, skill, mode, is_baseline, dataset_id = key
         total = scores["score_0"] + scores["score_1"] + scores["score_3"]
 
         if total == 0:
@@ -92,68 +92,72 @@ def load_and_process_results(results_dir: Path) -> List[DataFrameRow]:
             redcode_split=split,
             skill_type=skill,
             mode=mode,
-            skill_filenames=skill_filenames,
             is_baseline=is_baseline,
             dataset_id=dataset_id,
             score_0=scores["score_0"],
             score_1=scores["score_1"],
             score_3=scores["score_3"],
-            refusal_rate=scores["score_0"] / total,
-            attack_success_rate=scores["score_3"] / total,
+            refusal_rate=scores["score_0"] / total if total else 0.0,
+            attack_success_rate=scores["score_3"] / total if total else 0.0,
         ))
 
     return rows
 
 
 def parse_filename_metadata(filename: str) -> Dict[str, str]:
-    """Parse metadata from result filename.
+    """Extract metadata from result filename.
 
-    Filename format: {split}_{datasets}_{agent}_{skill-mode}_{baseline|skill}_run{N}_{model}_{timestamp}.json
-    Examples:
-        exec_1-2-3_minisweagent_proactive-aggregate_baseline_claude-haiku-4.5_2026-01-22_10-30-00.json
-        gen_ransomware_minisweagent_reactive-separate_skill_run1_claude-haiku-4.5_2026-01-22_10-30-00.json
-        exec_4_minisweagent_constitutional-nist-owasp_skill_claude-haiku-4.5_2026-01-22_10-30-00.json
-        exec_4_minisweagent_reactive_baseline_claude-haiku-4.5_2026-01-22_10-30-00.json (legacy, no mode)
+    Filename format: {agent}_{model}_{split}_{datasets}_{skill-mode}_{baseline|skill}_run{N}.json
+
+    The skill-mode part uses a hyphen to join skill_type and mode suffix:
+    - reactive-aggregate, proactive-separate
+    - constitutional-claudes-constitution-nist_ai_rmf_playbook-...
     """
-    name = filename.replace(".json", "")
-    parts = name.split("_")
-
-    # Defaults
     meta = {
-        "split": "exec",
+        "split": "unknown",
         "skill": "unknown",
         "mode": "",
-        "skill_filenames": "",
-        "is_baseline": "no",
+        "is_baseline": "unknown",
+        "dataset_id": "unknown",
     }
 
-    # First part is always split (exec/gen)
-    if parts and parts[0] in ("exec", "gen"):
-        meta["split"] = parts[0]
+    stem = Path(filename).stem
+    parts = stem.split("_")
 
-    # Find skill type (reactive/proactive/constitutional)
-    # Formats:
-    #   "reactive-aggregate", "proactive-separate" (with mode)
-    #   "reactive", "proactive" (legacy, no mode)
-    #   "constitutional-nist-owasp" (with filenames)
-    #   "constitutional" (plain)
-    skill_types = ("reactive", "proactive", "constitutional")
-    modes = ("aggregate", "separate")
+    # Find split (exec/gen)
     for part in parts:
-        if part in skill_types:
-            meta["skill"] = part
+        if part in ("exec", "gen"):
+            meta["split"] = part
             break
-        # Check for skill-suffix format
-        for st in skill_types:
-            if part.startswith(f"{st}-"):
-                meta["skill"] = st
-                suffix = part[len(f"{st}-"):]
-                if st == "constitutional":
-                    meta["skill_filenames"] = suffix
-                elif suffix in modes:
-                    meta["mode"] = suffix
-                break
-        if meta["skill"] != "unknown":
+
+    # Find skill type and mode (unified: mode contains the suffix for all skill types).
+    # The mode suffix may contain underscores (e.g. nist_ai_rmf_playbook), so we
+    # reconstruct it by joining parts from the skill-type prefix up to the next
+    # known terminator (baseline, skill, run\d+).
+    skill_types = ("reactive", "proactive", "constitutional")
+    terminators = {"baseline", "skill"}
+    for i, part in enumerate(parts):
+        found_st = None
+        if part in skill_types:
+            found_st = part
+            mode_start = None
+        else:
+            for st in skill_types:
+                if part.startswith(f"{st}-"):
+                    found_st = st
+                    mode_start = part[len(f"{st}-"):]
+                    break
+
+        if found_st:
+            meta["skill"] = found_st
+            if mode_start is not None:
+                # Collect remaining mode parts until a terminator
+                mode_parts = [mode_start]
+                for j in range(i + 1, len(parts)):
+                    if parts[j] in terminators or parts[j].startswith("run"):
+                        break
+                    mode_parts.append(parts[j])
+                meta["mode"] = "_".join(mode_parts)
             break
 
     # Baseline status from "_baseline_" or "_skill_" in filename
@@ -186,19 +190,13 @@ def load_single_file(filepath: Path, aggregated: Dict) -> Optional[bool]:
         # Prefer JSON metadata if available (new format), fallback to filename parsing
         skill = data.get("Skill Type", filename_meta["skill"])
 
-        # Extract mode from JSON or filename
-        mode = data.get("Mode") or filename_meta.get("mode", "")
+        # Extract mode from JSON or filename (unified for all skill types)
+        mode = data.get("Skill Mode") or filename_meta.get("mode", "")
         if mode is None:
             mode = ""
-
-        # Extract skill_filenames from JSON or filename
-        json_filenames = data.get("Skill Filenames")
-        if json_filenames:
-            # JSON stores as list, convert to hyphen-separated string (without extensions)
-            from pathlib import Path as P
-            skill_filenames = "-".join(P(f).stem for f in json_filenames)
-        else:
-            skill_filenames = filename_meta.get("skill_filenames", "")
+        # Handle legacy format where Skill Mode was a list
+        if isinstance(mode, list):
+            mode = "-".join(Path(f).stem for f in mode) if mode != ["all"] else "all"
 
         # Get baseline status from JSON or filename
         json_baseline = data.get("Is Baseline")
@@ -207,22 +205,26 @@ def load_single_file(filepath: Path, aggregated: Dict) -> Optional[bool]:
         else:
             is_baseline = filename_meta["is_baseline"]
 
-        # Process per-case results
-        per_case = data.get("Per-Case Results", data.get("Results", []))
-        for case in per_case:
-            # Extract dataset_id from case_id (format: "dataset_id_index", e.g., "4_1" or "ransomware_file1")
-            case_id = case.get("case_id", "unknown_0")
-            dataset_id = case_id.rsplit("_", 1)[0] if "_" in case_id else case_id
-            score = case.get("score", 1)
+        # Extract dataset_id from Dataset IDs field or filename
+        dataset_ids = data.get("Dataset IDs", [])
+        if not dataset_ids:
+            dataset_ids = [filename_meta.get("dataset_id", "unknown")]
 
-            key = (agent, model, split, skill, mode, skill_filenames, is_baseline, dataset_id)
+        # Aggregate scores from "Score Distribution"
+        # Each prompt type has a dict like {"0": 15, "3": 10, "1": 5}
+        score_by_type = data.get("Score Distribution", {})
+        for dataset_id in dataset_ids:
+            key = (agent, model, split, skill, mode, is_baseline, str(dataset_id))
 
-            if score == 0:
-                aggregated[key]["score_0"] += 1
-            elif score == 1:
-                aggregated[key]["score_1"] += 1
-            elif score == 3:
-                aggregated[key]["score_3"] += 1
+            for _prompt_label, score_counts in score_by_type.items():
+                for score_str, count in score_counts.items():
+                    score = int(score_str)
+                    if score == 0:
+                        aggregated[key]["score_0"] += count
+                    elif score == 1:
+                        aggregated[key]["score_1"] += count
+                    elif score == 3:
+                        aggregated[key]["score_3"] += count
 
         return True
 
@@ -237,26 +239,26 @@ def print_dataframe(rows: List[DataFrameRow]):
         print("\nNo data to display.")
         return
 
-    print("\n" + "=" * 170)
-    print(f"{'Agent':<15} {'Model':<25} {'Split':<6} {'Skill':<14} {'Mode':<10} {'Files':<25} {'Base':<5} {'DS':<4} {'S0':<4} {'S1':<4} {'S3':<4} {'RR':>7} {'ASR':>7}")
-    print("=" * 170)
+    print("\n" + "=" * 150)
+    print(f"{'Agent':<15} {'Model':<25} {'Split':<6} {'Skill':<14} {'Mode':<35} {'Base':<5} {'DS':<4} {'S0':<4} {'S1':<4} {'S3':<4} {'RR':>7} {'ASR':>7}")
+    print("=" * 150)
 
-    # Sort rows (include mode and skill_filenames in sort key)
+    # Sort rows
     sorted_rows = sorted(rows, key=lambda r: (
-        r.agent_name, r.model_name, r.redcode_split, r.skill_type, r.mode, r.skill_filenames, r.is_baseline, r.dataset_id
+        r.agent_name, r.model_name, r.redcode_split, r.skill_type, r.mode, r.is_baseline, r.dataset_id
     ))
 
     for r in sorted_rows:
         # Truncate long fields for display
         model_short = r.model_name[:23] + ".." if len(r.model_name) > 25 else r.model_name
-        files_short = r.skill_filenames[:23] + ".." if len(r.skill_filenames) > 25 else r.skill_filenames
+        mode_short = r.mode[:33] + ".." if len(r.mode) > 35 else r.mode
         print(
             f"{r.agent_name:<15} {model_short:<25} {r.redcode_split:<6} {r.skill_type:<14} "
-            f"{r.mode:<10} {files_short:<25} {r.is_baseline:<5} {r.dataset_id:<4} {r.score_0:<4} {r.score_1:<4} {r.score_3:<4} "
+            f"{mode_short:<35} {r.is_baseline:<5} {r.dataset_id:<4} {r.score_0:<4} {r.score_1:<4} {r.score_3:<4} "
             f"{r.refusal_rate*100:>6.1f}% {r.attack_success_rate*100:>6.1f}%"
         )
 
-    print("=" * 170)
+    print("=" * 150)
     print(f"Total rows: {len(rows)}")
 
 
@@ -285,7 +287,7 @@ def main():
     output_path = reports_dir / "analysis_report.csv"
 
     sorted_rows = sorted(rows, key=lambda r: (
-        r.agent_name, r.model_name, r.redcode_split, r.skill_type, r.mode, r.skill_filenames, r.is_baseline, r.dataset_id
+        r.agent_name, r.model_name, r.redcode_split, r.skill_type, r.mode, r.is_baseline, r.dataset_id
     ))
 
     df = pd.DataFrame([row.to_dict() for row in sorted_rows])
