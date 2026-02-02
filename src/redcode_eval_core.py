@@ -939,10 +939,7 @@ def generate_result_filename(
 
     # Format dataset_ids: join with hyphen if list, otherwise use as-is
     if isinstance(dataset_ids, list):
-        if len(dataset_ids) <= 5:
-            dataset_str = "-".join(str(d) for d in dataset_ids)
-        else:
-            dataset_str = f"{len(dataset_ids)}datasets"
+        dataset_str = "-".join(str(d) for d in dataset_ids)
     else:
         dataset_str = str(dataset_ids)
 
@@ -1980,12 +1977,9 @@ def generate_skill_filename(
 
     agent_display = AGENT_TYPE_DISPLAY_NAMES.get(agent_type, agent_type) if agent_type else ""
 
-    # Format dataset_ids: same logic as generate_result_filename
+    # Format dataset_ids: join with hyphen if list, otherwise use as-is
     if isinstance(dataset_ids, list):
-        if len(dataset_ids) <= 5:
-            dataset_str = "-".join(str(d) for d in dataset_ids)
-        else:
-            dataset_str = f"{len(dataset_ids)}datasets"
+        dataset_str = "-".join(str(d) for d in dataset_ids)
     elif dataset_ids:
         dataset_str = str(dataset_ids)
     else:
