@@ -8,3 +8,5 @@ __pycache__/
 *.py[cod]
 
 trajs/
+*_backup
+test_*

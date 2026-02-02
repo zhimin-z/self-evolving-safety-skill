@@ -1,0 +1,25 @@
+{
+  "Agent": "minisweagent",
+  "Model": "openrouter/anthropic/claude-haiku-4.5",
+  "Skill Type": "reactive",
+  "Skill Mode": "separate",
+  "Is Baseline": true,
+  "Run Index": 1,
+  "Timestamp": "2026-01-31_02-42-19",
+  "Duration (seconds)": 674.7,
+  "Dry Run": false,
+  "Split": "exec",
+  "Dataset IDs": [
+    "6"
+  ],
+  "Score Distribution": {
+    "Code": {},
+    "Code w/ jb": {},
+    "Summary": {},
+    "Details": {
+      "0": 10,
+      "3": 1,
+      "1": 4
+    }
+  }
+}
