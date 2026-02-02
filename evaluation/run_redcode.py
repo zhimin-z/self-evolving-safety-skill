@@ -71,6 +71,7 @@ from redcode_eval_core import (
     filter_failed_cases_from_baseline,
     load_redcode_datasets_for_generation,
     # Skill generation
+    generate_skill_filename,
     generate_skill_from_cases,
     inject_skill_into_config,
     # Evaluation
@@ -80,6 +81,28 @@ from redcode_eval_core import (
     run_evaluation,
     Container,
 )
+
+
+# ============================================================================
+# Skill Checkpoint
+# ============================================================================
+
+def _check_skill_checkpoint(output_dir, skill_type, split=None, dataset_ids=None, run_idx=None, filenames=None, mode=None):
+    """Check if a skill file already exists and return its content if so.
+
+    This avoids expensive re-generation of skills that have already been created.
+    The filename is computed using the same logic as save_skill() to ensure exact match.
+    """
+    filename = generate_skill_filename(skill_type, split, dataset_ids, run_idx, filenames, mode=mode)
+    skill_path = os.path.join(output_dir, filename)
+    if os.path.exists(skill_path):
+        with open(skill_path, "r") as f:
+            content = f.read()
+        if content.strip():
+            print(f"  [Checkpoint] Found existing skill: {filename}")
+            print(f"  [Checkpoint] Skipping skill generation (reusing cached skill)")
+            return content
+    return None
 
 
 # ============================================================================
@@ -166,8 +189,15 @@ def run_aggregate_experiment(
 
         print(f"  Train cases: {len(train_cases)}, Test cases: {len(test_cases)}")
 
-        # Generate skill
-        if skill_type == "reactive":
+        # Check for existing skill checkpoint (avoids expensive regeneration)
+        cached_skill = _check_skill_checkpoint(
+            output_dir, skill_type, split, all_dataset_ids,
+            run_idx, mode="aggregate"
+        )
+
+        if cached_skill is not None:
+            skill_content = cached_skill
+        elif skill_type == "reactive":
             # REACTIVE: Run baseline on train set first, then generate skill
             # from only the failed/non-refused cases (retrospection)
             print(f"\n  [Reactive] Running baseline on {len(train_cases)} train cases to identify failures...")
@@ -420,9 +450,6 @@ def run_separate_experiment(
 
     start_time = time.time()
 
-    # Track global run index across all datasets for successive numbering
-    global_run_idx = 0
-
     total_iterations = len(all_dataset_ids) * n_runs
     iteration = 0
 
@@ -439,10 +466,9 @@ def run_separate_experiment(
             continue
 
         for local_run_idx in range(1, n_runs + 1):
-            global_run_idx += 1
             iteration += 1
             print(f"\n{'='*60}")
-            print(f"[{iteration}/{total_iterations}] Dataset: {dataset_id}, Run: {global_run_idx}")
+            print(f"[{iteration}/{total_iterations}] Dataset: {dataset_id}, Run: {local_run_idx}/{n_runs}")
             print(f"{'='*60}")
 
             print(f"  Loaded {len(cases)} cases")
@@ -455,8 +481,15 @@ def run_separate_experiment(
 
             print(f"  Train: {len(train_cases)} cases, Test: {len(test_cases)} cases")
 
-            # Generate skill
-            if skill_type == "reactive":
+            # Check for existing skill checkpoint (avoids expensive regeneration)
+            cached_skill = _check_skill_checkpoint(
+                output_dir, skill_type, dataset_split, [dataset_id],
+                local_run_idx, mode="separate"
+            )
+
+            if cached_skill is not None:
+                skill_content = cached_skill
+            elif skill_type == "reactive":
                 # REACTIVE: Run baseline on train set first, then use only failed cases
                 print(f"\n  [Reactive] Running baseline on {len(train_cases)} train cases to identify failures...")
 
@@ -479,14 +512,14 @@ def run_separate_experiment(
                         agent_name=agent_name,
                         model_name=model_name,
                         skill_type=skill_type,
-                        run_idx=global_run_idx,
+                        run_idx=local_run_idx,
                         dry_run=dry_run,
                         agent_type=agent_type,
                         is_baseline=True,
                         mode="separate",
                     )
                     train_baseline_results.extend(exec_log.get("Results", []))
-                    _cleanup_latest_result(result_base, "exec", skill_type, global_run_idx, is_baseline=True, mode="separate")
+                    _cleanup_latest_result(result_base, "exec", skill_type, local_run_idx, is_baseline=True, mode="separate")
 
                 if gen_train:
                     gen_log = eval_gen_cases(
@@ -499,14 +532,14 @@ def run_separate_experiment(
                         agent_name=agent_name,
                         model_name=model_name,
                         skill_type=skill_type,
-                        run_idx=global_run_idx,
+                        run_idx=local_run_idx,
                         dry_run=dry_run,
                         agent_type=agent_type,
                         is_baseline=True,
                         mode="separate",
                     )
                     train_baseline_results.extend(gen_log.get("Results", []))
-                    _cleanup_latest_result(result_base, "gen", skill_type, global_run_idx, is_baseline=True, mode="separate")
+                    _cleanup_latest_result(result_base, "gen", skill_type, local_run_idx, is_baseline=True, mode="separate")
 
                 failed_cases = filter_failed_cases_from_baseline(train_baseline_results, train_cases)
                 print(f"\n  [Reactive] Baseline failures: {len(failed_cases)}/{len(train_cases)} train cases failed")
@@ -521,7 +554,7 @@ def run_separate_experiment(
                         split=dataset_split,
                         output_dir=output_dir,
                         dataset_ids=[dataset_id],
-                        run_idx=global_run_idx,
+                        run_idx=local_run_idx,
                         model=get_model_full_name(config),
                         mode="separate",
                     )
@@ -533,7 +566,7 @@ def run_separate_experiment(
                     split=dataset_split,
                     output_dir=output_dir,
                     dataset_ids=[dataset_id],
-                    run_idx=global_run_idx,
+                    run_idx=local_run_idx,
                     model=get_model_full_name(config),
                     mode="separate",
                 )
@@ -568,7 +601,7 @@ def run_separate_experiment(
                     agent_name=agent_name,
                     model_name=model_name,
                     skill_type=skill_type,
-                    run_idx=global_run_idx,
+                    run_idx=local_run_idx,
                     dry_run=dry_run,
                     agent_type=agent_type,
                     is_baseline=False,
@@ -586,7 +619,7 @@ def run_separate_experiment(
                     agent_name=agent_name,
                     model_name=model_name,
                     skill_type=skill_type,
-                    run_idx=global_run_idx,
+                    run_idx=local_run_idx,
                     dry_run=dry_run,
                     agent_type=agent_type,
                     is_baseline=False,
@@ -609,7 +642,7 @@ def run_separate_experiment(
                     agent_name=agent_name,
                     model_name=model_name,
                     skill_type=skill_type,  # Keep skill_type for context in filename
-                    run_idx=global_run_idx,
+                    run_idx=local_run_idx,
                     dry_run=dry_run,
                     agent_type=agent_type,
                     is_baseline=True,
@@ -627,14 +660,14 @@ def run_separate_experiment(
                     agent_name=agent_name,
                     model_name=model_name,
                     skill_type=skill_type,  # Keep skill_type for context in filename
-                    run_idx=global_run_idx,
+                    run_idx=local_run_idx,
                     dry_run=dry_run,
                     agent_type=agent_type,
                     is_baseline=True,
                     mode="separate",
                 )
 
-            print(f"\n  Run {global_run_idx} complete! (with skill + baseline)")
+            print(f"\n  Run {local_run_idx}/{n_runs} for dataset {dataset_id} complete! (with skill + baseline)")
 
     total_duration = time.time() - start_time
     print(f"\n{'='*60}")
@@ -772,7 +805,12 @@ Output:
     elif args.skill == 'constitutional':
         # Constitutional: single generation from safety standards, then evaluate on all data
         # --mode is not applicable here
-        skill_content = generate_skill(args.skill, args.split, dataset_ids, model=get_model_full_name(config), filenames=args.filenames)
+        output_dir = os.path.join(REPO_ROOT, "security-skills")
+        cached_skill = _check_skill_checkpoint(output_dir, args.skill, filenames=args.filenames)
+        if cached_skill is not None:
+            skill_content = cached_skill
+        else:
+            skill_content = generate_skill(args.skill, args.split, dataset_ids, model=get_model_full_name(config), filenames=args.filenames)
 
         print("=" * 60)
         print("[2/3] Running RedCode evaluation WITH constitutional skill")
