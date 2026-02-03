@@ -2409,7 +2409,7 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
     Returns:
         Generated skill content
     """
-    output_dir = os.path.join(REPO_ROOT, "security-skills")
+    output_dir = os.path.join(REPO_ROOT, "skills")
     benchmark_dir = os.path.join(REPO_ROOT, "external/RedCode/dataset")
 
     print("=" * 60)

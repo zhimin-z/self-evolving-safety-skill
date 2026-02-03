@@ -137,7 +137,7 @@ def run_aggregate_experiment(
     4. Aggregate test halves -> evaluate skill
     """
     benchmark_dir = os.path.join(REPO_ROOT, "external/RedCode/dataset")
-    output_dir = os.path.join(REPO_ROOT, "security-skills")
+    output_dir = os.path.join(REPO_ROOT, "skills")
     result_base = os.path.join(REPO_ROOT, "results")
     os.makedirs(result_base, exist_ok=True)
 
@@ -420,7 +420,7 @@ def run_separate_experiment(
     Uses eval_exec_cases/eval_gen_cases from core module for consistent evaluation.
     """
     benchmark_dir = os.path.join(REPO_ROOT, "external/RedCode/dataset")
-    output_dir = os.path.join(REPO_ROOT, "security-skills")
+    output_dir = os.path.join(REPO_ROOT, "skills")
     result_base = os.path.join(REPO_ROOT, "results")
     os.makedirs(result_base, exist_ok=True)
 
@@ -815,7 +815,7 @@ Output:
     elif args.skill == 'constitutional':
         # Constitutional: generate skill from safety standards, evaluate on all data
         # Supports n_runs for repeated generation + evaluation
-        output_dir = os.path.join(REPO_ROOT, "security-skills")
+        output_dir = os.path.join(REPO_ROOT, "skills")
 
         for run_idx in range(1, args.n_runs + 1):
             if args.n_runs > 1:
