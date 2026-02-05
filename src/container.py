@@ -4,11 +4,13 @@ import signal
 import logging
 import time
 import os
+import uuid
 
 class Container:
     def __init__(self, image, name=None):
         self.image = image
-        self.name = name if name else image
+        # Generate unique container name to avoid conflicts when running multiple containers
+        self.name = name if name else f"{image}-{uuid.uuid4().hex[:8]}"
         self.client = docker.from_env()
         
         # Check if the image exists, and build it if not
