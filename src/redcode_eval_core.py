@@ -33,15 +33,21 @@ import yaml
 import dotenv
 from litellm import completion
 
+# Import model router for SGLang/OpenRouter routing
+from src.model_router import get_router, completion_with_routing, RoutedLitellmModel
+
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 5  # seconds
 
 
 def completion_with_retry(max_retries: int = MAX_RETRIES, **kwargs):
-    """Call litellm completion with exponential backoff retry on transient errors."""
+    """Call completion with routing (SGLang -> OpenRouter fallback) and retry.
+
+    Routes to SGLang if model is available locally, otherwise falls back to OpenRouter.
+    """
     for attempt in range(1, max_retries + 1):
         try:
-            return completion(**kwargs)
+            return completion_with_routing(**kwargs)
         except Exception as e:
             if attempt == max_retries:
                 raise
@@ -60,14 +66,22 @@ DEFAULT_MODEL = "openrouter/anthropic/claude-haiku-4.5"
 JUDGE_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
 
 
-def get_openrouter_model(model_name: str) -> str:
-    """Convert model name to OpenRouter format for litellm.
+def get_routed_model(model_name: str) -> str:
+    """Get the properly formatted model name based on routing.
 
-    Adds 'openrouter/' prefix if not already present.
+    Returns the model name formatted for the appropriate backend:
+    - If available on SGLang: returns the normalized model name
+    - Otherwise: returns with 'openrouter/' prefix for OpenRouter
     """
-    if model_name.startswith("openrouter/"):
-        return model_name
-    return f"openrouter/{model_name}"
+    router = get_router()
+    target, formatted = router.get_routing_target(model_name)
+    return formatted
+
+
+# Alias for backward compatibility
+def get_openrouter_model(model_name: str) -> str:
+    """Legacy function - now routes to SGLang or OpenRouter based on availability."""
+    return get_routed_model(model_name)
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _REDCODE_EVAL = os.path.join(_REPO_ROOT, "external/RedCode/evaluation")
@@ -405,10 +419,10 @@ def build_agent(
     # Handle SWE-agent
     if agent_type == "swe":
         return SWEAgentWrapper(config, container, step_limit, timeout_override)
-    # Setup model
+    # Setup model with routing (SGLang -> OpenRouter fallback)
     model_cfg = config.get("model", {})
-    model = LitellmModel(
-        model_name=get_openrouter_model(model_cfg.get("model_name", DEFAULT_MODEL)),
+    model = RoutedLitellmModel(
+        model_name=model_cfg.get("model_name", DEFAULT_MODEL),
         model_kwargs=model_cfg.get("model_kwargs", {}),
         cost_tracking=model_cfg.get("cost_tracking", "default"),
     )

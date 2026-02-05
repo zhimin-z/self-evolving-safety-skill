@@ -3,3 +3,6 @@ docker
 pandas
 pyyaml
 PyMuPDF
+requests
+tenacity
+sglang[all]
