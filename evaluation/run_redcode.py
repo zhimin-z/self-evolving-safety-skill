@@ -51,6 +51,7 @@ from redcode_eval_core import (
     REPO_ROOT,
     SKILL_TYPES,
     AGENT_CONFIGS,
+    EXEC_INPUT_TYPE_TO_SCORE_KEY,
     # Utilities
     load_config,
     get_model_full_name,
@@ -63,6 +64,8 @@ from redcode_eval_core import (
     load_redcode_datasets_for_generation,
     _skill_mode_suffix,
     resolve_constitutional_mode,
+    check_existing_result_file,
+    generate_result_filename,
     # Skill generation
     generate_skill_filename,
     generate_skill_from_cases,
@@ -303,24 +306,45 @@ def run_aggregate_experiment(
         print(f"\n  [A] Evaluating WITH {skill_type} skill on {len(test_cases)} test cases...")
 
         if exec_test:
-            eval_exec_cases(
-                cases=exec_test,
-                config=run_config,
-                container_factory=create_container,
-                step_limit=step_limit,
-                timeout=timeout,
-                result_base=result_base,
-                agent_name=agent_name,
-                model_name=model_name,
-                skill_type=skill_type,
-                run_idx=run_idx,
-                dry_run=dry_run,
-                agent_type=agent_type,
-                is_baseline=False,
-                skill_mode="aggregate",
+            # Check for existing result file
+            unique_dataset_ids = sorted(set(case["dataset_id"] for case in exec_test))
+            resfilename = generate_result_filename(
+                "exec", unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
+                is_baseline=False, skill_mode="aggregate", agent_type=agent_type
             )
+            existing_result, missing_input_types = check_existing_result_file(result_base, resfilename)
+            if existing_result is not None and not missing_input_types:
+                print(f"  [Incremental] Skill result already complete, skipping exec evaluation")
+            else:
+                if existing_result is not None:
+                    print(f"  [Incremental] Found existing skill result with missing categories: {[EXEC_INPUT_TYPE_TO_SCORE_KEY.get(t, t) for t in missing_input_types]}")
+                eval_exec_cases(
+                    cases=exec_test,
+                    config=run_config,
+                    container_factory=create_container,
+                    step_limit=step_limit,
+                    timeout=timeout,
+                    result_base=result_base,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    skill_type=skill_type,
+                    run_idx=run_idx,
+                    dry_run=dry_run,
+                    agent_type=agent_type,
+                    is_baseline=False,
+                    skill_mode="aggregate",
+                    input_types_to_evaluate=missing_input_types if existing_result else None,
+                    existing_result=existing_result,
+                )
 
         if gen_test:
+            # Check for existing result file
+            unique_dataset_ids = sorted(set(case["dataset_id"] for case in gen_test))
+            resfilename = generate_result_filename(
+                "gen", unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
+                is_baseline=False, skill_mode="aggregate", agent_type=agent_type
+            )
+            existing_result, missing_categories = check_existing_result_file(result_base, resfilename)
             eval_gen_cases(
                 cases=gen_test,
                 config=run_config,
@@ -336,6 +360,8 @@ def run_aggregate_experiment(
                 agent_type=agent_type,
                 is_baseline=False,
                 skill_mode="aggregate",
+                skip_if_complete=True,
+                existing_result=existing_result,
             )
 
         # =====================================================================
@@ -344,24 +370,45 @@ def run_aggregate_experiment(
         print(f"\n  [B] Evaluating BASELINE (no skill) on same {len(test_cases)} test cases...")
 
         if exec_test:
-            eval_exec_cases(
-                cases=exec_test,
-                config=config,  # Original config WITHOUT skill injection
-                container_factory=create_container,
-                step_limit=step_limit,
-                timeout=timeout,
-                result_base=result_base,
-                agent_name=agent_name,
-                model_name=model_name,
-                skill_type=skill_type,  # Keep skill_type for context in filename
-                run_idx=run_idx,
-                dry_run=dry_run,
-                agent_type=agent_type,
-                is_baseline=True,
-                skill_mode="aggregate",
+            # Check for existing result file
+            unique_dataset_ids = sorted(set(case["dataset_id"] for case in exec_test))
+            resfilename = generate_result_filename(
+                "exec", unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
+                is_baseline=True, skill_mode="aggregate", agent_type=agent_type
             )
+            existing_result, missing_input_types = check_existing_result_file(result_base, resfilename)
+            if existing_result is not None and not missing_input_types:
+                print(f"  [Incremental] Baseline result already complete, skipping exec evaluation")
+            else:
+                if existing_result is not None:
+                    print(f"  [Incremental] Found existing baseline result with missing categories: {[EXEC_INPUT_TYPE_TO_SCORE_KEY.get(t, t) for t in missing_input_types]}")
+                eval_exec_cases(
+                    cases=exec_test,
+                    config=config,  # Original config WITHOUT skill injection
+                    container_factory=create_container,
+                    step_limit=step_limit,
+                    timeout=timeout,
+                    result_base=result_base,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    skill_type=skill_type,  # Keep skill_type for context in filename
+                    run_idx=run_idx,
+                    dry_run=dry_run,
+                    agent_type=agent_type,
+                    is_baseline=True,
+                    skill_mode="aggregate",
+                    input_types_to_evaluate=missing_input_types if existing_result else None,
+                    existing_result=existing_result,
+                )
 
         if gen_test:
+            # Check for existing result file
+            unique_dataset_ids = sorted(set(case["dataset_id"] for case in gen_test))
+            resfilename = generate_result_filename(
+                "gen", unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
+                is_baseline=True, skill_mode="aggregate", agent_type=agent_type
+            )
+            existing_result, missing_categories = check_existing_result_file(result_base, resfilename)
             eval_gen_cases(
                 cases=gen_test,
                 config=config,  # Original config WITHOUT skill injection
@@ -377,6 +424,8 @@ def run_aggregate_experiment(
                 agent_type=agent_type,
                 is_baseline=True,
                 skill_mode="aggregate",
+                skip_if_complete=True,
+                existing_result=existing_result,
             )
 
         print(f"\n[Run {run_idx}/{n_runs}] Complete! (with skill + baseline)")
@@ -589,24 +638,45 @@ def run_separate_experiment(
             print(f"\n  [A] Evaluating WITH {skill_type} skill on {len(test_cases)} test cases...")
 
             if exec_test:
-                eval_exec_cases(
-                    cases=exec_test,
-                    config=dataset_config,
-                    container_factory=create_container,
-                    step_limit=step_limit,
-                    timeout=timeout,
-                    result_base=result_base,
-                    agent_name=agent_name,
-                    model_name=model_name,
-                    skill_type=skill_type,
-                    run_idx=local_run_idx,
-                    dry_run=dry_run,
-                    agent_type=agent_type,
-                    is_baseline=False,
-                    skill_mode="separate",
+                # Check for existing result file
+                unique_dataset_ids = sorted(set(case["dataset_id"] for case in exec_test))
+                resfilename = generate_result_filename(
+                    "exec", unique_dataset_ids, agent_name, model_name, skill_type, local_run_idx,
+                    is_baseline=False, skill_mode="separate", agent_type=agent_type
                 )
+                existing_result, missing_input_types = check_existing_result_file(result_base, resfilename)
+                if existing_result is not None and not missing_input_types:
+                    print(f"  [Incremental] Skill result already complete, skipping exec evaluation")
+                else:
+                    if existing_result is not None:
+                        print(f"  [Incremental] Found existing skill result with missing categories: {[EXEC_INPUT_TYPE_TO_SCORE_KEY.get(t, t) for t in missing_input_types]}")
+                    eval_exec_cases(
+                        cases=exec_test,
+                        config=dataset_config,
+                        container_factory=create_container,
+                        step_limit=step_limit,
+                        timeout=timeout,
+                        result_base=result_base,
+                        agent_name=agent_name,
+                        model_name=model_name,
+                        skill_type=skill_type,
+                        run_idx=local_run_idx,
+                        dry_run=dry_run,
+                        agent_type=agent_type,
+                        is_baseline=False,
+                        skill_mode="separate",
+                        input_types_to_evaluate=missing_input_types if existing_result else None,
+                        existing_result=existing_result,
+                    )
 
             if gen_test:
+                # Check for existing result file
+                unique_dataset_ids = sorted(set(case["dataset_id"] for case in gen_test))
+                resfilename = generate_result_filename(
+                    "gen", unique_dataset_ids, agent_name, model_name, skill_type, local_run_idx,
+                    is_baseline=False, skill_mode="separate", agent_type=agent_type
+                )
+                existing_result, missing_categories = check_existing_result_file(result_base, resfilename)
                 eval_gen_cases(
                     cases=gen_test,
                     config=dataset_config,
@@ -622,6 +692,8 @@ def run_separate_experiment(
                     agent_type=agent_type,
                     is_baseline=False,
                     skill_mode="separate",
+                    skip_if_complete=True,
+                    existing_result=existing_result,
                 )
 
             # =====================================================================
@@ -630,24 +702,45 @@ def run_separate_experiment(
             print(f"\n  [B] Evaluating BASELINE (no skill) on same {len(test_cases)} test cases...")
 
             if exec_test:
-                eval_exec_cases(
-                    cases=exec_test,
-                    config=config,  # Original config WITHOUT skill injection
-                    container_factory=create_container,
-                    step_limit=step_limit,
-                    timeout=timeout,
-                    result_base=result_base,
-                    agent_name=agent_name,
-                    model_name=model_name,
-                    skill_type=skill_type,  # Keep skill_type for context in filename
-                    run_idx=local_run_idx,
-                    dry_run=dry_run,
-                    agent_type=agent_type,
-                    is_baseline=True,
-                    skill_mode="separate",
+                # Check for existing result file
+                unique_dataset_ids = sorted(set(case["dataset_id"] for case in exec_test))
+                resfilename = generate_result_filename(
+                    "exec", unique_dataset_ids, agent_name, model_name, skill_type, local_run_idx,
+                    is_baseline=True, skill_mode="separate", agent_type=agent_type
                 )
+                existing_result, missing_input_types = check_existing_result_file(result_base, resfilename)
+                if existing_result is not None and not missing_input_types:
+                    print(f"  [Incremental] Baseline result already complete, skipping exec evaluation")
+                else:
+                    if existing_result is not None:
+                        print(f"  [Incremental] Found existing baseline result with missing categories: {[EXEC_INPUT_TYPE_TO_SCORE_KEY.get(t, t) for t in missing_input_types]}")
+                    eval_exec_cases(
+                        cases=exec_test,
+                        config=config,  # Original config WITHOUT skill injection
+                        container_factory=create_container,
+                        step_limit=step_limit,
+                        timeout=timeout,
+                        result_base=result_base,
+                        agent_name=agent_name,
+                        model_name=model_name,
+                        skill_type=skill_type,  # Keep skill_type for context in filename
+                        run_idx=local_run_idx,
+                        dry_run=dry_run,
+                        agent_type=agent_type,
+                        is_baseline=True,
+                        skill_mode="separate",
+                        input_types_to_evaluate=missing_input_types if existing_result else None,
+                        existing_result=existing_result,
+                    )
 
             if gen_test:
+                # Check for existing result file
+                unique_dataset_ids = sorted(set(case["dataset_id"] for case in gen_test))
+                resfilename = generate_result_filename(
+                    "gen", unique_dataset_ids, agent_name, model_name, skill_type, local_run_idx,
+                    is_baseline=True, skill_mode="separate", agent_type=agent_type
+                )
+                existing_result, missing_categories = check_existing_result_file(result_base, resfilename)
                 eval_gen_cases(
                     cases=gen_test,
                     config=config,  # Original config WITHOUT skill injection
@@ -663,6 +756,8 @@ def run_separate_experiment(
                     agent_type=agent_type,
                     is_baseline=True,
                     skill_mode="separate",
+                    skip_if_complete=True,
+                    existing_result=existing_result,
                 )
 
             print(f"\n  Run {local_run_idx}/{n_runs} for dataset {dataset_id} complete! (with skill + baseline)")
