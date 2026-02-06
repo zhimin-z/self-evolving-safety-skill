@@ -534,28 +534,20 @@ def save_result(eval_log_json: Dict, resfile: str):
         json.dump(res_records, file, indent=4)
 
 
-def save_trajectory(
+def build_trajectory(
     case_id: str,
     messages: List,
     exec_history: List[Dict],
-    traj_dir: str,
     extra_metadata: Optional[Dict] = None,
-):
-    """Save agent trajectory for a single case.
+) -> Dict:
+    """Build a trajectory dict for a single case.
 
     Args:
         case_id: Unique identifier for the case (e.g., "4_1" or "ransomware_file1")
         messages: Agent conversation messages
         exec_history: Command execution history
-        traj_dir: Directory to save trajectory files
         extra_metadata: Optional additional metadata to include
     """
-    os.makedirs(traj_dir, exist_ok=True)
-
-    # Sanitize case_id for filename
-    safe_case_id = str(case_id).replace("/", "-").replace(" ", "_")
-    traj_file = os.path.join(traj_dir, f"{safe_case_id}.json")
-
     trajectory = {
         "case_id": case_id,
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
@@ -566,9 +558,19 @@ def save_trajectory(
     if extra_metadata:
         trajectory["metadata"] = extra_metadata
 
-    with open(traj_file, "w", encoding="utf-8") as f:
-        json.dump(trajectory, f, indent=2)
+    return trajectory
 
+
+def save_trajectories(trajectories: List[Dict], traj_file: str):
+    """Save all trajectories to a single JSON file.
+
+    Args:
+        trajectories: List of trajectory dicts built by build_trajectory()
+        traj_file: Path to the output JSON file
+    """
+    os.makedirs(os.path.dirname(traj_file), exist_ok=True)
+    with open(traj_file, "w", encoding="utf-8") as f:
+        json.dump(trajectories, f, indent=2)
     return traj_file
 
 
@@ -662,6 +664,7 @@ def eval_dataset(
     run_idx: int = 1,
     step_limit: int = -1,
     timeout: int = -1,
+    data_split: str = "exec",
 ):
     """Evaluate agent on a single RedCode dataset with per-attack isolation.
 
@@ -695,14 +698,12 @@ def eval_dataset(
 
     start_time = time.time()
 
-    # Create trajectory directory from result file path
-    # resfile: results/exec_4_agent_baseline_model_timestamp.json
-    # traj_dir: trajs/exec_4_agent_baseline_model_timestamp/
+    # Trajectory file: same name as result file, in trajs/ directory
     traj_base = result_base_dir.replace("/results", "/trajs")
     if traj_base == result_base_dir:
         traj_base = os.path.join(os.path.dirname(result_base_dir), "trajs")
-    resfile_basename = os.path.basename(resfile).replace(".json", "")
-    traj_dir = os.path.join(traj_base, resfile_basename)
+    traj_file = os.path.join(traj_base, os.path.basename(resfile))
+    all_trajectories = []
 
     # Evaluate each test case with all prompt types
     for item in data:
@@ -744,21 +745,20 @@ def eval_dataset(
                     "status": end_reason,
                 })
 
-                # Save trajectory for this case + input_type
+                # Accumulate trajectory for this case + input_type
                 if not dry_run:
                     case_traj_id = f"{index}_{input_type}"
-                    save_trajectory(
+                    all_trajectories.append(build_trajectory(
                         case_id=case_traj_id,
                         messages=prompt_result.get("messages", []),
                         exec_history=agent.env.get_history() if hasattr(agent, 'env') else [],
-                        traj_dir=traj_dir,
                         extra_metadata={
                             "score": score,
                             "input_type": input_type,
                             "prompt": prompt,
                             "end_reason": end_reason,
                         },
-                    )
+                    ))
             except Exception as exc:  # pylint: disable=broad-except
                 res_prompt_type[input_type].append(1)
                 all_results.append({
@@ -792,7 +792,7 @@ def eval_dataset(
         "Timestamp": timestamp,
         "Duration (seconds)": round(duration, 2),
         "Dry Run": dry_run,
-        "Split": "exec",
+        "Split": data_split,
         "Dataset IDs": [dataset_id],
 
         "Score Distribution": {
@@ -806,6 +806,11 @@ def eval_dataset(
     os.makedirs(os.path.dirname(resfile), exist_ok=True)
     with open(resfile, "w", encoding="utf-8") as f:
         json.dump(eval_log, f, indent=2)
+
+    # Save trajectories as a single file matching the result filename
+    if all_trajectories:
+        save_trajectories(all_trajectories, traj_file)
+        print(f"  Trajectories saved to: {traj_file}")
 
     print(f"\n  Results saved to: {resfile}")
 
@@ -1305,21 +1310,20 @@ def eval_gen_category(
     run_idx: int = 1,
     step_limit: int = -1,
     timeout: int = -1,
+    data_split: str = "gen",
 ):
     """Evaluate agent on RedCode-Gen category (malware code generation)."""
     results = []
     start_time = time.time()
     base_model = None
 
-    # Create trajectory directory from result file path
-    # resfile: results/gen_category_agent_baseline_model_timestamp.json
-    # traj_dir: trajs/gen_category_agent_baseline_model_timestamp/
+    # Trajectory file: same name as result file, in trajs/ directory
     resfile_dir = os.path.dirname(resfile)
     traj_base = resfile_dir.replace("/results", "/trajs")
     if traj_base == resfile_dir:
         traj_base = os.path.join(os.path.dirname(resfile_dir), "trajs")
-    resfile_basename = os.path.basename(resfile).replace(".json", "")
-    traj_dir = os.path.join(traj_base, resfile_basename)
+    traj_file = os.path.join(traj_base, os.path.basename(resfile))
+    all_trajectories = []
 
     for case in cases:
         case_id = f"{case['category']}_{case['filename']}"
@@ -1355,14 +1359,13 @@ def eval_gen_category(
                 "status": status,
             })
 
-            # Save trajectory
-            save_trajectory(
+            # Accumulate trajectory
+            all_trajectories.append(build_trajectory(
                 case_id=case_id,
                 messages=agent.messages,
                 exec_history=exec_history,
-                traj_dir=traj_dir,
                 extra_metadata={"score": score, "status": status, "prompt": prompt},
-            )
+            ))
 
         except Exception as exc:
             results.append({
@@ -1391,7 +1394,7 @@ def eval_gen_category(
         "Timestamp": timestamp,
         "Duration (seconds)": round(duration, 2),
         "Dry Run": dry_run,
-        "Split": "gen",
+        "Split": data_split,
         "Dataset IDs": [category],
 
         "Score Distribution": {
@@ -1404,6 +1407,11 @@ def eval_gen_category(
 
     with open(resfile, "w", encoding="utf-8") as f:
         json.dump(eval_log, f, indent=2)
+
+    # Save trajectories as a single file matching the result filename
+    if all_trajectories:
+        save_trajectories(all_trajectories, traj_file)
+        print(f"  Trajectories saved to: {traj_file}")
 
 
 # ============================================================================
@@ -2131,11 +2139,13 @@ def eval_exec_cases(
     """Evaluate agent on specific RedCode-Exec cases."""
     os.makedirs(result_base, exist_ok=True)
     start_time = time.time()
+    data_split = cases[0]["split"] if cases else "exec"
 
-    # Create trajectory directory (parallel to results)
+    # Trajectory base directory (parallel to results)
     traj_base = result_base.replace("/results", "/trajs")
     if traj_base == result_base:
         traj_base = os.path.join(os.path.dirname(result_base), "trajs")
+    all_trajectories = []
 
     # Group cases by dataset_id for result organization
     by_dataset: Dict[str, List[Dict]] = defaultdict(list)
@@ -2204,23 +2214,16 @@ def eval_exec_cases(
                     })
                     res_prompt_type[input_type].append(score)
 
-                    # Save trajectory
-                    traj_subdir = generate_result_filename(
-                        "exec", case["dataset_id"], agent_name, model_name,
-                        skill_type, run_idx, is_baseline=is_baseline, suffix="",
-                        skill_mode=skill_mode, agent_type=agent_type
-                    ).replace(".json", "")
-                    traj_dir = os.path.join(traj_base, traj_subdir)
-                    save_trajectory(
+                    # Accumulate trajectory
+                    all_trajectories.append(build_trajectory(
                         case_id=case_id,
                         messages=agent.messages,
                         exec_history=exec_history,
-                        traj_dir=traj_dir,
                         extra_metadata={
                             "score": score, "status": status,
                             "prompt": prompt, "input_type": input_type,
                         },
-                    )
+                    ))
 
                 except Exception as exc:
                     dataset_results.append({
@@ -2257,7 +2260,7 @@ def eval_exec_cases(
         "Timestamp": timestamp,
         "Duration (seconds)": round(duration, 2),
         "Dry Run": dry_run,
-        "Split": "exec",
+        "Split": data_split,
         "Dataset IDs": unique_dataset_ids,
         "Score Distribution": {
             "Code": dict(Counter(res_prompt_type["code_input"])),
@@ -2267,13 +2270,20 @@ def eval_exec_cases(
         },
     }
 
-    resfile = os.path.join(result_base, generate_result_filename(
-        "exec", unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
+    result_filename = generate_result_filename(
+        data_split, unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
         is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
-    ))
+    )
+    resfile = os.path.join(result_base, result_filename)
 
     with open(resfile, "w") as f:
         json.dump(eval_log, f, indent=2)
+
+    # Save trajectories as a single file matching the result filename
+    if all_trajectories:
+        traj_file = os.path.join(traj_base, result_filename)
+        save_trajectories(all_trajectories, traj_file)
+        print(f"  Trajectories saved to: {traj_file}")
 
     print(f"\n  Results saved to: {resfile}")
     return eval_log
@@ -2298,20 +2308,13 @@ def eval_gen_cases(
     """Evaluate agent on specific RedCode-Gen cases."""
     os.makedirs(result_base, exist_ok=True)
     start_time = time.time()
+    data_split = cases[0]["split"] if cases else "gen"
 
-    # Create trajectory directory (parallel to results)
+    # Trajectory base directory (parallel to results)
     traj_base = result_base.replace("/results", "/trajs")
     if traj_base == result_base:
         traj_base = os.path.join(os.path.dirname(result_base), "trajs")
-
-    # Extract unique dataset_ids for trajectory folder naming
-    unique_dataset_ids = sorted(set(case["dataset_id"] for case in cases))
-    traj_subdir = generate_result_filename(
-        "gen", unique_dataset_ids, agent_name, model_name,
-        skill_type, run_idx, is_baseline=is_baseline, suffix="",
-        skill_mode=skill_mode, agent_type=agent_type
-    ).replace(".json", "")
-    traj_dir = os.path.join(traj_base, traj_subdir)
+    all_trajectories = []
 
     all_results = []
 
@@ -2344,14 +2347,13 @@ def eval_gen_cases(
                 "status": status,
             })
 
-            # Save trajectory
-            save_trajectory(
+            # Accumulate trajectory
+            all_trajectories.append(build_trajectory(
                 case_id=case_id,
                 messages=agent.messages,
                 exec_history=exec_history,
-                traj_dir=traj_dir,
                 extra_metadata={"score": score, "status": status, "prompt": prompt},
-            )
+            ))
 
         except Exception as exc:
             all_results.append({
@@ -2384,20 +2386,27 @@ def eval_gen_cases(
         "Timestamp": timestamp,
         "Duration (seconds)": round(duration, 2),
         "Dry Run": dry_run,
-        "Split": "gen",
+        "Split": data_split,
         "Dataset IDs": unique_dataset_ids,
         "Score Distribution": {
             "Code Generation": score_dist,
         },
     }
 
-    resfile = os.path.join(result_base, generate_result_filename(
-        "gen", unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
+    result_filename = generate_result_filename(
+        data_split, unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
         is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
-    ))
+    )
+    resfile = os.path.join(result_base, result_filename)
 
     with open(resfile, "w") as f:
         json.dump(eval_log, f, indent=2)
+
+    # Save trajectories as a single file matching the result filename
+    if all_trajectories:
+        traj_file = os.path.join(traj_base, result_filename)
+        save_trajectories(all_trajectories, traj_file)
+        print(f"  Trajectories saved to: {traj_file}")
 
     print(f"\n  Results saved to: {resfile}")
     return eval_log
@@ -2583,6 +2592,7 @@ def run_evaluation(
         sys.exit(1)
 
     # Evaluate RedCode-Exec
+    exec_split = "exec"
     for dataset_id in exec_ids:
         jsonfile = exec_dataset_path / f"py2text_dataset_json/index{dataset_id}_30_codes_full.json"
 
@@ -2601,7 +2611,7 @@ def run_evaluation(
         print(f"{'='*60}\n")
 
         resfile = os.path.join(result_base, generate_result_filename(
-            "exec", dataset_id, agent_name, model_name, skill_type, run_idx,
+            exec_split, dataset_id, agent_name, model_name, skill_type, run_idx,
             is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
         ))
 
@@ -2634,11 +2644,13 @@ def run_evaluation(
             run_idx=run_idx,
             step_limit=step_limit,
             timeout=timeout,
+            data_split=exec_split,
         )
 
         print(f"\n[RedCode-Exec] Dataset {dataset_id} complete!")
 
     # Evaluate RedCode-Gen
+    gen_split = "gen"
     for category in gen_ids:
         cases = load_redcode_gen_cases(gen_dataset_path, category)
 
@@ -2657,7 +2669,7 @@ def run_evaluation(
         print(f"{'='*60}\n")
 
         resfile = os.path.join(result_base, generate_result_filename(
-            "gen", category, agent_name, model_name, skill_type, run_idx,
+            gen_split, category, agent_name, model_name, skill_type, run_idx,
             is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
         ))
 
@@ -2688,6 +2700,7 @@ def run_evaluation(
             run_idx=run_idx,
             step_limit=step_limit,
             timeout=timeout,
+            data_split=gen_split,
         )
 
         print(f"\n[RedCode-Gen] Category {category} complete!")
