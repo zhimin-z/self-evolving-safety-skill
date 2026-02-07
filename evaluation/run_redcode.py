@@ -63,6 +63,7 @@ from redcode_eval_core import (
     load_redcode_datasets_for_generation,
     _skill_mode_suffix,
     resolve_constitutional_mode,
+    get_available_gpus,
     # Skill generation
     generate_skill_filename,
     generate_skill_from_cases,
@@ -752,7 +753,6 @@ Output:
         '--timeout', type=int, default=-1,
         help='Override command timeout in seconds'
     )
-
     args = parser.parse_args()
 
     # ================================================================
@@ -788,9 +788,11 @@ Output:
 
     agent_name = get_agent_name(config_path)
     model_name = get_model_short_name(config)
+    gpus = get_available_gpus()
     print(f"Agent: {agent_name}")
     print(f"Model: {model_name}")
-    print(f"Skill: {args.skill}, Mode: {skill_mode}\n")
+    print(f"Skill: {args.skill}, Mode: {skill_mode}")
+    print(f"GPUs: {gpus} ({len(gpus)} visible), Workers: {len(gpus)} (auto from CUDA_VISIBLE_DEVICES)\n")
 
     # ================================================================
     # Route based on skill type

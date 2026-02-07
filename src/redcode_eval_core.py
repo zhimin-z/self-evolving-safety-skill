@@ -15,6 +15,7 @@ Type Safety Note:
 - The code works correctly at runtime; IDE warnings can be safely ignored
 """
 
+import concurrent.futures
 import datetime
 import json
 import os
@@ -22,6 +23,7 @@ import platform
 import random
 import shlex
 import sys
+import threading
 import time
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
@@ -131,6 +133,41 @@ AGENT_TYPE_DISPLAY_NAMES = {
 SAFETY_STANDARDS_DIR = os.path.join(_REPO_ROOT, "safety_standards")
 
 MAX_SKILL_CHARS = 14000
+
+# ---------------------------------------------------------------------------
+# GPU / Worker Utilities
+# ---------------------------------------------------------------------------
+
+def get_available_gpus() -> List[int]:
+    """Read CUDA_VISIBLE_DEVICES env var and return list of GPU IDs.
+
+    Re-reads the env var on every call so that mid-experiment changes
+    (e.g., a classmate releasing GPUs) are picked up at the next step.
+
+    Returns:
+        List of GPU index integers, e.g. [4, 5, 6, 7].
+        Returns [0] if CUDA_VISIBLE_DEVICES is unset (assume 1 GPU).
+    """
+    cuda_env = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    if not cuda_env.strip():
+        return [0]
+    try:
+        return [int(g.strip()) for g in cuda_env.split(",") if g.strip()]
+    except ValueError:
+        return [0]
+
+
+def get_num_workers() -> int:
+    """Determine number of parallel workers from CUDA_VISIBLE_DEVICES.
+
+    Re-reads the env var on every call so that changes are picked up
+    between evaluation steps (e.g., a classmate releasing GPUs).
+
+    Returns:
+        Number of workers (>= 1).
+    """
+    gpus = get_available_gpus()
+    return max(1, len(gpus))
 CHUNK_SIZE_CHARS = 6000
 
 # ---------------------------------------------------------------------------
@@ -681,6 +718,67 @@ def run_prompt(
     }
 
 
+def _eval_single_dataset_item(
+    dataset_id: int,
+    index: str,
+    input_type: str,
+    prompt: str,
+    container_factory: Callable,
+    agent_factory: Callable,
+    jsonfile: str,
+    result_base_dir: str,
+    dry_run: bool,
+) -> Tuple[Dict, Optional[Dict]]:
+    """Evaluate a single (index, input_type) pair from eval_dataset. Thread-safe."""
+    case_id = f"{dataset_id}_{index}_{input_type}"
+
+    if dry_run:
+        return (
+            {"case_id": case_id, "index": index, "input_type": input_type, "score": 1, "reason": "dry_run"},
+            None,
+        )
+
+    container = container_factory()
+    agent = agent_factory(container)
+
+    try:
+        prompt_result = run_prompt(
+            index, prompt, input_type, agent, container,
+            jsonfile, result_base_dir, dry_run
+        )
+        score = prompt_result["result"]
+        end_reason = prompt_result.get("end_reason", "unknown")
+
+        result = {
+            "case_id": case_id,
+            "index": index,
+            "input_type": input_type,
+            "score": score,
+            "status": end_reason,
+        }
+
+        trajectory = build_trajectory(
+            case_id=f"{index}_{input_type}",
+            messages=prompt_result.get("messages", []),
+            exec_history=agent.env.get_history() if hasattr(agent, 'env') else [],
+            extra_metadata={
+                "score": score, "input_type": input_type,
+                "prompt": prompt, "end_reason": end_reason,
+            },
+        )
+
+        return result, trajectory
+
+    except Exception as exc:  # pylint: disable=broad-except
+        return (
+            {"case_id": case_id, "index": index, "input_type": input_type, "score": 1, "error": str(exc)},
+            None,
+        )
+
+    finally:
+        container.close()
+
+
 def eval_dataset(
     dataset_id: int,
     container_factory: callable,
@@ -700,35 +798,17 @@ def eval_dataset(
     timeout: int = -1,
     data_split: str = "exec",
 ):
-    """Evaluate agent on a single RedCode dataset with per-attack isolation.
-
-    Args:
-        dataset_id: Dataset ID number
-        container_factory: Function that creates a new Container
-        agent_factory: Function that creates a new agent given a container
-        jsonfile: Path to RedCode dataset JSON
-        resfile: Path to save results
-        result_base_dir: Base directory for evaluation outputs
-        dry_run: If True, skip actual execution
-        case_limit: Limit number of test cases (<=0 for all)
-        agent_name: Name of the agent (for result metadata)
-        model_full_name: Full model name (for result metadata)
-        skill_type: Skill type being evaluated (for result metadata)
-        skill_mode: "aggregate"/"separate" or list of safety standard names (for result metadata)
-        is_baseline: Whether this is a baseline run (for result metadata)
-        run_idx: Run index (for result metadata)
-        step_limit: Agent step limit (for result metadata)
-        timeout: Command timeout (for result metadata)
-    """
+    """Evaluate agent on a single RedCode dataset with per-attack isolation."""
     # Load dataset
     with open(jsonfile, "r", encoding="utf-8") as file:
         data = json.load(file)
     if case_limit and case_limit > 0:
         data = data[:case_limit]
 
-    res_prompt_type = {input_type: [] for input_type in ALL_EXEC_INPUT_TYPES}
-    all_results = []  # Individual case results for aligned format
-    base_model = None
+    # --- Dynamic GPU check ---
+    gpus = get_available_gpus()
+    workers = get_num_workers()
+    print(f"  [GPU] Available GPUs: {gpus} -> using {workers} worker(s)")
 
     start_time = time.time()
 
@@ -737,88 +817,69 @@ def eval_dataset(
     if traj_base == result_base_dir:
         traj_base = os.path.join(os.path.dirname(result_base_dir), "trajs")
     traj_file = os.path.join(traj_base, os.path.basename(resfile))
-    all_trajectories = []
 
-    # Evaluate each test case with all prompt types
+    # Flatten all (item, input_type) pairs into work items
+    work_items = []
     for item in data:
         index = item["Index"]
-        language = item["Language"].lower()
-        code = item["Code"]
-
-        # Generate prompts for different attack types
         prompt_map = generate_prompt_map(
-            code=code, language=language,
+            code=item["Code"], language=item["Language"].lower(),
             text_summary=item["Text_summary"], text_details=item["Text_details"],
         )
-
-        # Test all prompt types with FRESH container + agent for each
         for input_type in ALL_EXEC_INPUT_TYPES:
-            prompt = prompt_map[input_type]
+            work_items.append({
+                "index": index,
+                "input_type": input_type,
+                "prompt": prompt_map[input_type],
+            })
 
-            # Create fresh container and agent for this attack
-            print(f"  Creating fresh container for {input_type}...")
-            container = container_factory()
-            agent = agent_factory(container)
-            if base_model is None:
-                base_model = agent.model.config.model_name
+    print(f"  {len(work_items)} work items from {len(data)} cases x {len(ALL_EXEC_INPUT_TYPES)} input types")
 
-            try:
-                prompt_result = run_prompt(
-                    index, prompt, input_type, agent, container,
-                    jsonfile, result_base_dir, dry_run
-                )
-                score = prompt_result["result"]
-                res_prompt_type[input_type].append(score)
-                end_reason = prompt_result.get("end_reason", "unknown")
+    # --- Execute ---
+    all_results = []
+    all_trajectories = []
+    res_prompt_type = {t: [] for t in ALL_EXEC_INPUT_TYPES}
+    completed = 0
+    lock = threading.Lock()
 
-                all_results.append({
-                    "case_id": f"{dataset_id}_{index}_{input_type}",
-                    "index": index,
-                    "input_type": input_type,
-                    "score": score,
-                    "status": end_reason,
-                })
+    def process_item(item):
+        nonlocal completed
+        result, trajectory = _eval_single_dataset_item(
+            dataset_id=dataset_id,
+            index=item["index"],
+            input_type=item["input_type"],
+            prompt=item["prompt"],
+            container_factory=container_factory,
+            agent_factory=agent_factory,
+            jsonfile=jsonfile,
+            result_base_dir=result_base_dir,
+            dry_run=dry_run,
+        )
+        with lock:
+            all_results.append(result)
+            res_prompt_type[item["input_type"]].append(result["score"])
+            if trajectory:
+                all_trajectories.append(trajectory)
+            completed += 1
+            print(f"    [{completed}/{len(work_items)}] {result['case_id']}  score={result['score']}")
+        return result
 
-                # Accumulate trajectory for this case + input_type
-                if not dry_run:
-                    case_traj_id = f"{index}_{input_type}"
-                    all_trajectories.append(build_trajectory(
-                        case_id=case_traj_id,
-                        messages=prompt_result.get("messages", []),
-                        exec_history=agent.env.get_history() if hasattr(agent, 'env') else [],
-                        extra_metadata={
-                            "score": score,
-                            "input_type": input_type,
-                            "prompt": prompt,
-                            "end_reason": end_reason,
-                        },
-                    ))
-            except Exception as exc:  # pylint: disable=broad-except
-                res_prompt_type[input_type].append(1)
-                all_results.append({
-                    "case_id": f"{dataset_id}_{index}_{input_type}",
-                    "index": index,
-                    "input_type": input_type,
-                    "score": 1,
-                    "error": str(exc),
-                })
-            finally:
-                # Clean up container after each attack
-                container.close()
-
-        print(f" ----- {index} done")
+    if workers <= 1:
+        for item in work_items:
+            process_item(item)
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(process_item, work_items))
 
     duration = time.time() - start_time
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    # Compute overall score distribution across all evaluations
     all_scores = [r['score'] for r in all_results]
     score_dist = dict(Counter(all_scores))
 
-    # Compile final results (unified format across all skill types)
     eval_log = {
         "Agent": agent_name,
-        "Model": model_full_name or base_model or "unknown",
+        "Model": model_full_name or "unknown",
         "Skill Type": skill_type,
         "Skill Mode": _skill_mode_suffix(skill_mode) if skill_mode is not None else None,
         "Is Baseline": is_baseline,
@@ -828,6 +889,7 @@ def eval_dataset(
         "Dry Run": dry_run,
         "Split": data_split,
         "Dataset IDs": [dataset_id],
+        "Num Workers": workers,
 
         "Score Distribution": {
             "Code": dict(Counter(res_prompt_type["code_input"])),
@@ -1329,6 +1391,51 @@ def score_exec_response(
     return 1
 
 
+def _eval_single_gen_category_item(
+    case: Dict,
+    case_id: str,
+    container_factory: Callable,
+    agent_factory: Callable,
+    dry_run: bool,
+) -> Tuple[Dict, Optional[Dict]]:
+    """Evaluate a single gen category case. Thread-safe."""
+    prompt = CODE_GENERATION_PROMPT + case['content']
+
+    if dry_run:
+        return ({"case_id": case_id, "score": 1, "reason": "dry_run"}, None)
+
+    container = container_factory()
+    agent = agent_factory(container)
+
+    try:
+        agent.env.reset_history()
+        status, message = agent.run(prompt)
+
+        exec_history = agent.env.get_history()
+        response = message
+        if exec_history:
+            response = "\n".join([
+                f"$ {h['command']}\n{h['output']}" for h in exec_history
+            ])
+
+        score = score_gen_response(response, case['content'])
+
+        result = {"case_id": case_id, "score": score, "status": status}
+        trajectory = build_trajectory(
+            case_id=case_id,
+            messages=agent.messages,
+            exec_history=exec_history,
+            extra_metadata={"score": score, "status": status, "prompt": prompt},
+        )
+        return result, trajectory
+
+    except Exception as exc:
+        return ({"case_id": case_id, "score": 1, "error": str(exc)}, None)
+
+    finally:
+        container.close()
+
+
 def eval_gen_category(
     category: str,
     cases: List[dict],
@@ -1347,9 +1454,12 @@ def eval_gen_category(
     data_split: str = "gen",
 ):
     """Evaluate agent on RedCode-Gen category (malware code generation)."""
-    results = []
+    # --- Dynamic GPU check ---
+    gpus = get_available_gpus()
+    workers = get_num_workers()
+    print(f"  [GPU] Available GPUs: {gpus} -> using {workers} worker(s)")
+
     start_time = time.time()
-    base_model = None
 
     # Trajectory file: same name as result file, in trajs/ directory
     resfile_dir = os.path.dirname(resfile)
@@ -1357,70 +1467,53 @@ def eval_gen_category(
     if traj_base == resfile_dir:
         traj_base = os.path.join(os.path.dirname(resfile_dir), "trajs")
     traj_file = os.path.join(traj_base, os.path.basename(resfile))
-    all_trajectories = []
 
+    # Build work items
+    work_items = []
     for case in cases:
         case_id = f"{case['category']}_{case['filename']}"
-        print(f"  Processing: {case_id}")
+        work_items.append({"case": case, "case_id": case_id})
 
-        prompt = CODE_GENERATION_PROMPT + case['content']
+    print(f"  {len(work_items)} work items")
 
-        if dry_run:
-            results.append({"case_id": case_id, "score": 1, "reason": "dry_run"})
-            continue
+    # --- Execute ---
+    all_results = []
+    all_trajectories = []
+    completed = 0
+    lock = threading.Lock()
 
-        container = container_factory()
-        agent = agent_factory(container)
-        if base_model is None:
-            base_model = agent.model.config.model_name
+    def process_item(item):
+        nonlocal completed
+        result, trajectory = _eval_single_gen_category_item(
+            case=item["case"],
+            case_id=item["case_id"],
+            container_factory=container_factory,
+            agent_factory=agent_factory,
+            dry_run=dry_run,
+        )
+        with lock:
+            all_results.append(result)
+            if trajectory:
+                all_trajectories.append(trajectory)
+            completed += 1
+            print(f"    [{completed}/{len(work_items)}] {item['case_id']}  score={result['score']}")
+        return result
 
-        try:
-            agent.env.reset_history()
-            status, message = agent.run(prompt)
-
-            exec_history = agent.env.get_history()
-            response = message
-            if exec_history:
-                response = "\n".join([
-                    f"$ {h['command']}\n{h['output']}" for h in exec_history
-                ])
-
-            score = score_gen_response(response, case['content'])
-
-            results.append({
-                "case_id": case_id,
-                "score": score,
-                "status": status,
-            })
-
-            # Accumulate trajectory
-            all_trajectories.append(build_trajectory(
-                case_id=case_id,
-                messages=agent.messages,
-                exec_history=exec_history,
-                extra_metadata={"score": score, "status": status, "prompt": prompt},
-            ))
-
-        except Exception as exc:
-            results.append({
-                "case_id": case_id,
-                "score": 1,
-                "error": str(exc),
-            })
-
-        finally:
-            container.close()
-
-        print(f"    Score: {results[-1]['score']}")
+    if workers <= 1:
+        for item in work_items:
+            process_item(item)
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(process_item, work_items))
 
     duration = time.time() - start_time
-    scores = [r['score'] for r in results]
+    scores = [r['score'] for r in all_results]
     score_dist = dict(Counter(scores))
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     eval_log = {
         "Agent": agent_name,
-        "Model": model_full_name or base_model or "unknown",
+        "Model": model_full_name or "unknown",
         "Skill Type": skill_type,
         "Skill Mode": _skill_mode_suffix(skill_mode) if skill_mode is not None else None,
         "Is Baseline": is_baseline,
@@ -1430,6 +1523,7 @@ def eval_gen_category(
         "Dry Run": dry_run,
         "Split": data_split,
         "Dataset IDs": [category],
+        "Num Workers": workers,
 
         "Score Distribution": {
             "Code Generation": score_dist,
@@ -2194,6 +2288,78 @@ def generate_skill_from_cases(
     return skill_content
 
 
+def _eval_single_exec_item(
+    case: Dict,
+    input_type: str,
+    prompt: str,
+    case_id: str,
+    config: dict,
+    container_factory: Callable,
+    step_limit: int,
+    timeout: int,
+    agent_type: str,
+    dry_run: bool,
+) -> Tuple[Dict, Optional[Dict]]:
+    """Evaluate a single (case, input_type) pair. Thread-safe.
+
+    Returns:
+        (result_dict, trajectory_dict_or_None)
+    """
+    if dry_run:
+        return (
+            {"case_id": case_id, "input_type": input_type, "score": 1, "reason": "dry_run"},
+            None,
+        )
+
+    container = container_factory()
+    agent = build_agent(config, container, step_limit, timeout, agent_type=agent_type)
+
+    try:
+        agent.env.reset_history()
+        status, message = agent.run(prompt)
+
+        exec_history = agent.env.get_history()
+        response = message
+        if exec_history:
+            response = format_history(exec_history)
+
+        score = score_exec_response(
+            container=container.container,
+            case_index=case["index"],
+            response=response,
+            expected_result=case.get("expected_result", ""),
+            had_execution=bool(exec_history),
+        )
+
+        result = {
+            "case_id": case_id,
+            "input_type": input_type,
+            "score": score,
+            "status": status,
+        }
+
+        trajectory = build_trajectory(
+            case_id=case_id,
+            messages=agent.messages,
+            exec_history=exec_history,
+            extra_metadata={
+                "score": score, "status": status,
+                "prompt": prompt, "input_type": input_type,
+            },
+        )
+
+        return result, trajectory
+
+    except Exception as exc:
+        return (
+            {"case_id": case_id, "input_type": input_type, "score": 1, "error": str(exc)},
+            None,
+        )
+
+    finally:
+        container.close()
+
+
 def eval_exec_cases(
     cases: List[Dict],
     config: dict,
@@ -2215,113 +2381,79 @@ def eval_exec_cases(
     start_time = time.time()
     data_split = cases[0]["split"] if cases else "exec"
 
+    # --- Dynamic GPU check: re-read CUDA_VISIBLE_DEVICES every time ---
+    gpus = get_available_gpus()
+    workers = get_num_workers()
+    print(f"  [GPU] Available GPUs: {gpus} -> using {workers} worker(s)")
+
     # Trajectory base directory (parallel to results)
     traj_base = result_base.replace("/results", "/trajs")
     if traj_base == result_base:
         traj_base = os.path.join(os.path.dirname(result_base), "trajs")
-    all_trajectories = []
 
-    # Group cases by dataset_id for result organization
-    by_dataset: Dict[str, List[Dict]] = defaultdict(list)
+    # Flatten all (case, input_type) pairs into work items
+    work_items = []
     for case in cases:
-        by_dataset[case["dataset_id"]].append(case)
+        base_case_id = f"{case['dataset_id']}_{case['index']}"
+        prompt_map = generate_prompt_map(
+            code=case.get("code", ""),
+            language=case.get("language", "python"),
+            text_summary=case.get("text_summary", ""),
+            text_details=case["content"],
+        )
+        for input_type in ALL_EXEC_INPUT_TYPES:
+            work_items.append({
+                "case": case,
+                "input_type": input_type,
+                "prompt": prompt_map[input_type],
+                "case_id": f"{base_case_id}_{input_type}",
+            })
 
+    print(f"  [RedCode-Exec] {len(work_items)} work items from {len(cases)} cases")
+
+    # --- Execute (parallel or sequential) ---
     all_results = []
+    all_trajectories = []
     res_prompt_type = {t: [] for t in ALL_EXEC_INPUT_TYPES}
+    completed = 0
+    lock = threading.Lock()
 
-    for dataset_id, dataset_cases in sorted(by_dataset.items()):
-        print(f"\n  [RedCode-Exec] Evaluating {len(dataset_cases)} cases from dataset {dataset_id}...")
+    def process_item(item):
+        nonlocal completed
+        result, trajectory = _eval_single_exec_item(
+            case=item["case"],
+            input_type=item["input_type"],
+            prompt=item["prompt"],
+            case_id=item["case_id"],
+            config=config,
+            container_factory=container_factory,
+            step_limit=step_limit,
+            timeout=timeout,
+            agent_type=agent_type,
+            dry_run=dry_run,
+        )
+        with lock:
+            all_results.append(result)
+            res_prompt_type[item["input_type"]].append(result["score"])
+            if trajectory:
+                all_trajectories.append(trajectory)
+            completed += 1
+            print(f"    [{completed}/{len(work_items)}] {item['case_id']}  score={result['score']}")
+        return result
 
-        dataset_results = []
-
-        for case in dataset_cases:
-            base_case_id = f"{case['dataset_id']}_{case['index']}"
-
-            # Generate all 4 prompt variants from raw case data
-            prompt_map = generate_prompt_map(
-                code=case.get("code", ""),
-                language=case.get("language", "python"),
-                text_summary=case.get("text_summary", ""),
-                text_details=case["content"],
-            )
-
-            for input_type in ALL_EXEC_INPUT_TYPES:
-                prompt = prompt_map[input_type]
-                case_id = f"{base_case_id}_{input_type}"
-                print(f"    Processing case: {case_id}")
-
-                if dry_run:
-                    dataset_results.append({
-                        "case_id": case_id, "input_type": input_type,
-                        "score": 1, "reason": "dry_run",
-                    })
-                    res_prompt_type[input_type].append(1)
-                    continue
-
-                # Fresh container + agent per prompt type (prevents state contamination)
-                container = container_factory()
-                agent = build_agent(config, container, step_limit, timeout, agent_type=agent_type)
-
-                try:
-                    agent.env.reset_history()
-                    status, message = agent.run(prompt)
-
-                    exec_history = agent.env.get_history()
-                    response = message
-                    if exec_history:
-                        response = format_history(exec_history)
-
-                    # Proper RedCode scoring with threat verification
-                    score = score_exec_response(
-                        container=container.container,
-                        case_index=case["index"],
-                        response=response,
-                        expected_result=case.get("expected_result", ""),
-                        had_execution=bool(exec_history),
-                    )
-
-                    dataset_results.append({
-                        "case_id": case_id,
-                        "input_type": input_type,
-                        "score": score,
-                        "status": status,
-                    })
-                    res_prompt_type[input_type].append(score)
-
-                    # Accumulate trajectory
-                    all_trajectories.append(build_trajectory(
-                        case_id=case_id,
-                        messages=agent.messages,
-                        exec_history=exec_history,
-                        extra_metadata={
-                            "score": score, "status": status,
-                            "prompt": prompt, "input_type": input_type,
-                        },
-                    ))
-
-                except Exception as exc:
-                    dataset_results.append({
-                        "case_id": case_id,
-                        "input_type": input_type,
-                        "score": 1,
-                        "error": str(exc),
-                    })
-                    res_prompt_type[input_type].append(1)
-
-                finally:
-                    container.close()
-
-                print(f"      Score: {dataset_results[-1]['score']}")
-
-        all_results.extend(dataset_results)
+    if workers <= 1:
+        # Sequential: same as before
+        for item in work_items:
+            process_item(item)
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(process_item, work_items))
 
     # Save aggregated results
     duration = time.time() - start_time
     scores = [r['score'] for r in all_results]
-    score_dist = dict(Counter(scores))
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    # Extract unique dataset_ids from cases
     unique_dataset_ids = sorted(set(case["dataset_id"] for case in cases))
 
     eval_log = {
@@ -2336,6 +2468,7 @@ def eval_exec_cases(
         "Dry Run": dry_run,
         "Split": data_split,
         "Dataset IDs": unique_dataset_ids,
+        "Num Workers": workers,
         "Score Distribution": {
             "Code": dict(Counter(res_prompt_type["code_input"])),
             "Code w/ jb": dict(Counter(res_prompt_type["code_input_jailbreaking"])),
@@ -2363,6 +2496,57 @@ def eval_exec_cases(
     return eval_log
 
 
+def _eval_single_gen_item(
+    case: Dict,
+    case_id: str,
+    config: dict,
+    container_factory: Callable,
+    step_limit: int,
+    timeout: int,
+    agent_type: str,
+    dry_run: bool,
+) -> Tuple[Dict, Optional[Dict]]:
+    """Evaluate a single gen case. Thread-safe.
+
+    Returns:
+        (result_dict, trajectory_dict_or_None)
+    """
+    if dry_run:
+        return ({"case_id": case_id, "score": 1, "reason": "dry_run"}, None)
+
+    container = container_factory()
+    agent = build_agent(config, container, step_limit, timeout, agent_type=agent_type)
+
+    try:
+        agent.env.reset_history()
+        prompt = CODE_GENERATION_PROMPT + case["content"]
+        status, message = agent.run(prompt)
+
+        exec_history = agent.env.get_history()
+        response = message
+        if exec_history:
+            response = "\n".join([f"$ {h['command']}\n{h['output']}" for h in exec_history])
+
+        score = score_gen_response(response, case["content"])
+
+        result = {"case_id": case_id, "score": score, "status": status}
+
+        trajectory = build_trajectory(
+            case_id=case_id,
+            messages=agent.messages,
+            exec_history=exec_history,
+            extra_metadata={"score": score, "status": status, "prompt": prompt},
+        )
+
+        return result, trajectory
+
+    except Exception as exc:
+        return ({"case_id": case_id, "score": 1, "error": str(exc)}, None)
+
+    finally:
+        container.close()
+
+
 def eval_gen_cases(
     cases: List[Dict],
     config: dict,
@@ -2384,62 +2568,56 @@ def eval_gen_cases(
     start_time = time.time()
     data_split = cases[0]["split"] if cases else "gen"
 
+    # --- Dynamic GPU check: re-read CUDA_VISIBLE_DEVICES every time ---
+    gpus = get_available_gpus()
+    workers = get_num_workers()
+    print(f"  [GPU] Available GPUs: {gpus} -> using {workers} worker(s)")
+
     # Trajectory base directory (parallel to results)
     traj_base = result_base.replace("/results", "/trajs")
     if traj_base == result_base:
         traj_base = os.path.join(os.path.dirname(result_base), "trajs")
-    all_trajectories = []
 
-    all_results = []
-
+    # Build work items
+    work_items = []
     for case in cases:
         case_id = f"{case['dataset_id']}_{case['index']}"
-        print(f"    Processing case: {case_id}")
+        work_items.append({"case": case, "case_id": case_id})
 
-        if dry_run:
-            all_results.append({"case_id": case_id, "score": 1, "reason": "dry_run"})
-            continue
+    print(f"  [RedCode-Gen] {len(work_items)} work items")
 
-        container = container_factory()
-        agent = build_agent(config, container, step_limit, timeout, agent_type=agent_type)
+    # --- Execute (parallel or sequential) ---
+    all_results = []
+    all_trajectories = []
+    completed = 0
+    lock = threading.Lock()
 
-        try:
-            agent.env.reset_history()
-            prompt = CODE_GENERATION_PROMPT + case["content"]
-            status, message = agent.run(prompt)
+    def process_item(item):
+        nonlocal completed
+        result, trajectory = _eval_single_gen_item(
+            case=item["case"],
+            case_id=item["case_id"],
+            config=config,
+            container_factory=container_factory,
+            step_limit=step_limit,
+            timeout=timeout,
+            agent_type=agent_type,
+            dry_run=dry_run,
+        )
+        with lock:
+            all_results.append(result)
+            if trajectory:
+                all_trajectories.append(trajectory)
+            completed += 1
+            print(f"    [{completed}/{len(work_items)}] {item['case_id']}  score={result['score']}")
+        return result
 
-            exec_history = agent.env.get_history()
-            response = message
-            if exec_history:
-                response = "\n".join([f"$ {h['command']}\n{h['output']}" for h in exec_history])
-
-            score = score_gen_response(response, case["content"])
-
-            all_results.append({
-                "case_id": case_id,
-                "score": score,
-                "status": status,
-            })
-
-            # Accumulate trajectory
-            all_trajectories.append(build_trajectory(
-                case_id=case_id,
-                messages=agent.messages,
-                exec_history=exec_history,
-                extra_metadata={"score": score, "status": status, "prompt": prompt},
-            ))
-
-        except Exception as exc:
-            all_results.append({
-                "case_id": case_id,
-                "score": 1,
-                "error": str(exc),
-            })
-
-        finally:
-            container.close()
-
-        print(f"      Score: {all_results[-1]['score']}")
+    if workers <= 1:
+        for item in work_items:
+            process_item(item)
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(process_item, work_items))
 
     # Save aggregated results
     duration = time.time() - start_time
@@ -2447,7 +2625,6 @@ def eval_gen_cases(
     score_dist = dict(Counter(scores))
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    # Extract unique dataset_ids from cases
     unique_dataset_ids = sorted(set(case["dataset_id"] for case in cases))
 
     eval_log = {
@@ -2462,6 +2639,7 @@ def eval_gen_cases(
         "Dry Run": dry_run,
         "Split": data_split,
         "Dataset IDs": unique_dataset_ids,
+        "Num Workers": workers,
         "Score Distribution": {
             "Code Generation": score_dist,
         },

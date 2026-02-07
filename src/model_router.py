@@ -75,8 +75,19 @@ def _is_local_model(model_name: str) -> bool:
     return False
 
 
+def _get_cuda_visible_devices() -> str:
+    """Read the current CUDA_VISIBLE_DEVICES env var (may change between calls)."""
+    return os.environ.get("CUDA_VISIBLE_DEVICES", "")
+
+
 def _get_gpu_count() -> int:
-    """Detect number of available GPUs."""
+    """Detect number of available GPUs (respects CUDA_VISIBLE_DEVICES)."""
+    cuda_env = _get_cuda_visible_devices()
+    if cuda_env.strip():
+        try:
+            return len([g for g in cuda_env.split(",") if g.strip()])
+        except ValueError:
+            pass
     try:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
@@ -133,6 +144,7 @@ class SGLangServerManager:
         self._lock = threading.Lock()
         self._servers: Dict[str, Dict[str, Any]] = {}  # model -> {process, port, url}
         self._gpu_count = _get_gpu_count()
+        self._gpu_env_snapshot = _get_cuda_visible_devices()  # track GPU set at launch
 
         # Register cleanup on exit
         atexit.register(self.shutdown_all)
@@ -175,11 +187,26 @@ class SGLangServerManager:
             time.sleep(2)
         return False
 
+    def _check_gpu_change(self):
+        """Check if CUDA_VISIBLE_DEVICES changed; if so, restart all servers."""
+        current_env = _get_cuda_visible_devices()
+        if current_env != self._gpu_env_snapshot:
+            logger.info(
+                f"GPU set changed: '{self._gpu_env_snapshot}' -> '{current_env}'. "
+                f"Restarting all SGLang servers."
+            )
+            # Restart all servers with new GPU set
+            for normalized in list(self._servers.keys()):
+                self._cleanup_server(normalized)
+            self._gpu_env_snapshot = current_env
+            self._gpu_count = _get_gpu_count()
+
     def ensure_server(self, model_name: str) -> Optional[str]:
         """
         Ensure a server is running for the given model.
 
         Thread-safe: only one server will be started even with concurrent calls.
+        Re-reads CUDA_VISIBLE_DEVICES and restarts servers if GPU set changed.
 
         Args:
             model_name: HuggingFace model name (e.g., "Qwen/Qwen2.5-Coder-7B-Instruct")
@@ -202,6 +229,9 @@ class SGLangServerManager:
             # Server died, will restart below
 
         with self._lock:
+            # Check if GPU set changed since last server launch
+            self._check_gpu_change()
+
             # Double-check after acquiring lock
             if normalized in self._servers:
                 server = self._servers[normalized]
