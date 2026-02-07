@@ -176,10 +176,37 @@ class SGLangServerManager:
             port += 1
         return port
 
-    def _wait_for_server(self, url: str, timeout: int = 300) -> bool:
-        """Wait for server to become healthy."""
+    def _wait_for_server(self, url: str, process: subprocess.Popen = None, timeout: int = 300) -> bool:
+        """Wait for server to become healthy.
+
+        If process is provided, checks whether it has exited (crash/error)
+        and surfaces the error output immediately instead of waiting for
+        the full timeout.
+        """
         start = time.time()
         while time.time() - start < timeout:
+            # Check if the server process died
+            if process is not None and process.poll() is not None:
+                exit_code = process.returncode
+                # Read whatever output the process produced
+                output = ""
+                try:
+                    output = process.stdout.read() if process.stdout else ""
+                except Exception:
+                    pass
+                # Extract last meaningful lines for the error message
+                lines = [l for l in output.strip().split("\n") if l.strip()] if output else []
+                tail = "\n".join(lines[-20:]) if lines else "(no output captured)"
+                logger.error(
+                    f"SGLang server process exited with code {exit_code}. "
+                    f"Last output:\n{tail}"
+                )
+                print(
+                    f"\n  [SGLang ERROR] Server process died (exit code {exit_code}).\n"
+                    f"  Last output:\n{tail}\n"
+                )
+                return False
+
             try:
                 resp = requests.get(f"{url}/v1/models", timeout=5)
                 if resp.status_code == 200:
@@ -276,7 +303,7 @@ class SGLangServerManager:
 
                 # Wait for server to be ready
                 logger.info(f"Waiting for SGLang server to start (this may take a few minutes)...")
-                if self._wait_for_server(url, timeout=600):  # 10 min timeout for large models
+                if self._wait_for_server(url, process=process, timeout=600):  # 10 min timeout for large models
                     self._servers[normalized] = {
                         "process": process,
                         "port": port,
@@ -286,8 +313,11 @@ class SGLangServerManager:
                     logger.info(f"SGLang server ready at {url}")
                     return url
                 else:
-                    logger.error(f"SGLang server failed to start within timeout")
-                    process.terminate()
+                    # If process is still alive, it's a genuine timeout
+                    if process.poll() is None:
+                        logger.error(f"SGLang server failed to start within timeout (600s)")
+                        process.terminate()
+                    # If process already exited, _wait_for_server already logged the error
                     return None
 
             except Exception as e:

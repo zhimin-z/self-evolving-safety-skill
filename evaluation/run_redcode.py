@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import os
+os.environ.setdefault("SGLANG_DISABLE_CUDNN_CHECK", "1")
 """
 RedCode evaluation script with optional skill generation.
 
