@@ -36,7 +36,7 @@ import dotenv
 from litellm import completion
 
 # Import model router for SGLang/OpenRouter routing
-from src.model_router import get_router, completion_with_routing, RoutedLitellmModel, _is_local_model
+from src.model_router import get_router, completion_with_routing, RoutedLitellmModel, _is_local_model, warmup_local_model
 
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 5  # seconds

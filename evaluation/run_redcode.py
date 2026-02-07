@@ -64,6 +64,7 @@ from redcode_eval_core import (
     _skill_mode_suffix,
     resolve_constitutional_mode,
     get_available_gpus,
+    warmup_local_model,
     # Skill generation
     generate_skill_filename,
     generate_skill_from_cases,
@@ -793,6 +794,12 @@ Output:
     print(f"Model: {model_name}")
     print(f"Skill: {args.skill}, Mode: {skill_mode}")
     print(f"GPUs: {gpus} ({len(gpus)} visible), Workers: {len(gpus)} (auto from CUDA_VISIBLE_DEVICES)\n")
+
+    # ================================================================
+    # Pre-warm SGLang server for local models (downloads + loads once)
+    # ================================================================
+    full_model = get_model_full_name(config)
+    warmup_local_model(full_model)
 
     # ================================================================
     # Route based on skill type

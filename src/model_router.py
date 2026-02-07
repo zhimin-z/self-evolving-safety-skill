@@ -517,6 +517,40 @@ def shutdown_servers():
     get_server_manager().shutdown_all()
 
 
+def warmup_local_model(model_name: str) -> bool:
+    """Pre-start SGLang server for a local model before workers spawn.
+
+    Call this once on the main thread at startup. If the model is not local
+    (closed-source / OpenRouter), this is a no-op.
+
+    Returns:
+        True if server is ready, False if model is remote or server failed.
+    """
+    if not _is_local_model(model_name):
+        print(f"  [Model] '{model_name}' -> remote API (no local GPU needed)")
+        return False
+
+    print(f"  [Model] '{model_name}' -> local model, pre-starting SGLang server...")
+    router = get_router()
+    if not router.auto_deploy or not router._server_manager:
+        print(f"  [Model] SGLang auto-deploy is disabled (SGLANG_AUTO_DEPLOY=false)")
+        return False
+
+    # Strip routing prefixes to get HuggingFace model path
+    original = model_name
+    for prefix in ["openrouter/", "sglang/", "local/"]:
+        if original.lower().startswith(prefix):
+            original = original[len(prefix):]
+
+    url = router._server_manager.ensure_server(original)
+    if url:
+        print(f"  [Model] SGLang server ready at {url}")
+        return True
+    else:
+        print(f"  [Model] SGLang server failed to start, will fallback to OpenRouter")
+        return False
+
+
 class RoutedLitellmModel:
     """
     A LitellmModel-compatible class that routes requests through ModelRouter.
