@@ -103,6 +103,30 @@ def _get_gpu_count() -> int:
     return 1
 
 
+def _get_gpu_ids() -> List[int]:
+    """Return individual GPU IDs from CUDA_VISIBLE_DEVICES.
+
+    If CUDA_VISIBLE_DEVICES="4,5,6,7", returns [4, 5, 6, 7].
+    If unset, attempts nvidia-smi detection and returns [0, ..., N-1].
+    """
+    cuda_env = _get_cuda_visible_devices()
+    if cuda_env.strip():
+        try:
+            return [int(g.strip()) for g in cuda_env.split(",") if g.strip()]
+        except ValueError:
+            pass
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return [int(line.strip()) for line in result.stdout.strip().split("\n") if line.strip()]
+    except Exception:
+        pass
+    return [0]
+
+
 def _estimate_tp_size(model_name: str, gpu_count: int) -> int:
     """Estimate tensor parallelism size based on model and available GPUs."""
     normalized = model_name.lower()
@@ -142,8 +166,10 @@ class SGLangServerManager:
     def __init__(self, base_port: int = 30000):
         self.base_port = base_port
         self._lock = threading.Lock()
-        self._servers: Dict[str, Dict[str, Any]] = {}  # model -> {process, port, url}
+        self._servers: Dict[str, List[Dict[str, Any]]] = {}  # model -> list of {process, port, url, gpu_ids}
+        self._rr_counters: Dict[str, int] = {}  # model -> round-robin counter
         self._gpu_count = _get_gpu_count()
+        self._gpu_ids = _get_gpu_ids()
         self._gpu_env_snapshot = _get_cuda_visible_devices()  # track GPU set at launch
 
         # Register cleanup on exit
@@ -153,7 +179,7 @@ class SGLangServerManager:
             signal.signal(signal.SIGTERM, self._signal_handler)
             signal.signal(signal.SIGINT, self._signal_handler)
 
-        logger.info(f"SGLangServerManager initialized with {self._gpu_count} GPUs")
+        logger.info(f"SGLangServerManager initialized with {self._gpu_count} GPUs (IDs: {self._gpu_ids})")
 
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully."""
@@ -168,9 +194,14 @@ class SGLangServerManager:
                 normalized = normalized[len(prefix):]
         return normalized
 
-    def _find_free_port(self) -> int:
+    def _find_free_port(self, reserved: Set[int] = None) -> int:
         """Find a free port starting from base_port."""
-        used_ports = {s["port"] for s in self._servers.values()}
+        used_ports: Set[int] = set()
+        for instances in self._servers.values():
+            for s in instances:
+                used_ports.add(s["port"])
+        if reserved:
+            used_ports |= reserved
         port = self.base_port
         while port in used_ports:
             port += 1
@@ -224,136 +255,324 @@ class SGLangServerManager:
                 f"GPU set changed: '{self._gpu_env_snapshot}' -> '{current_env}'. "
                 f"Restarting all SGLang servers."
             )
-            # Restart all servers with new GPU set
             for normalized in list(self._servers.keys()):
-                self._cleanup_server(normalized)
+                self._cleanup_model_servers(normalized)
             self._gpu_env_snapshot = current_env
             self._gpu_count = _get_gpu_count()
+            self._gpu_ids = _get_gpu_ids()
 
-    def ensure_server(self, model_name: str) -> Optional[str]:
-        """
-        Ensure a server is running for the given model.
-
-        Thread-safe: only one server will be started even with concurrent calls.
-        Re-reads CUDA_VISIBLE_DEVICES and restarts servers if GPU set changed.
+    def _start_single_server(
+        self,
+        model_name: str,
+        tp_size: int,
+        gpu_ids: Optional[List[int]] = None,
+        port: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Launch one SGLang server instance, optionally pinned to specific GPU(s).
 
         Args:
-            model_name: HuggingFace model name (e.g., "Qwen/Qwen2.5-Coder-7B-Instruct")
+            model_name: HuggingFace model path
+            tp_size: Tensor parallelism size
+            gpu_ids: If provided, sets CUDA_VISIBLE_DEVICES for this subprocess
+            port: If provided, use this port; otherwise find a free one
 
         Returns:
-            Server URL if successful, None if failed
+            Server info dict or None on failure.
+        """
+        if port is None:
+            port = self._find_free_port()
+
+        cmd = [
+            "python", "-m", "sglang.launch_server",
+            "--model-path", model_name,
+            "--port", str(port),
+            "--tp", str(tp_size),
+            "--host", "0.0.0.0",
+        ]
+        if tp_size >= 2:
+            cmd.extend(["--chunked-prefill-size", "8192"])
+
+        env = os.environ.copy()
+        if gpu_ids is not None:
+            env["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
+
+        gpu_label = gpu_ids if gpu_ids else "all"
+        logger.info(f"Starting SGLang for {model_name} on port {port}, tp={tp_size}, gpus={gpu_label}")
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=env,
+            )
+            url = f"http://localhost:{port}"
+
+            if self._wait_for_server(url, process=process, timeout=600):
+                info = {
+                    "process": process,
+                    "port": port,
+                    "url": url,
+                    "model": model_name,
+                    "gpu_ids": gpu_ids or [],
+                }
+                logger.info(f"SGLang server ready at {url} (gpus={gpu_label})")
+                return info
+            else:
+                if process.poll() is None:
+                    logger.error(f"SGLang server on port {port} failed to start within timeout")
+                    process.terminate()
+                return None
+        except Exception as e:
+            logger.error(f"Failed to start SGLang server: {e}")
+            return None
+
+    def ensure_server_pool(self, model_name: str) -> bool:
+        """Ensure a pool of servers is running for the given model.
+
+        For tp=1 models: starts one server per available GPU (data parallelism).
+        For tp>1 models: starts one server using tp GPUs (tensor parallelism).
+
+        Thread-safe. Returns True if at least one server is healthy.
         """
         normalized = self._normalize_model(model_name)
 
-        # Fast path: check if already running (no lock needed for read)
-        if normalized in self._servers:
-            server = self._servers[normalized]
-            # Verify it's still healthy
-            try:
-                resp = requests.get(f"{server['url']}/v1/models", timeout=5)
-                if resp.status_code == 200:
-                    return server["url"]
-            except requests.RequestException:
-                pass
-            # Server died, will restart below
+        # Fast path: pool already exists with healthy servers
+        if normalized in self._servers and self._servers[normalized]:
+            for instance in self._servers[normalized]:
+                try:
+                    resp = requests.get(f"{instance['url']}/v1/models", timeout=5)
+                    if resp.status_code == 200:
+                        return True
+                except requests.RequestException:
+                    continue
 
         with self._lock:
-            # Check if GPU set changed since last server launch
             self._check_gpu_change()
 
-            # Double-check after acquiring lock
-            if normalized in self._servers:
-                server = self._servers[normalized]
-                try:
-                    resp = requests.get(f"{server['url']}/v1/models", timeout=5)
-                    if resp.status_code == 200:
-                        return server["url"]
-                except requests.RequestException:
-                    # Clean up dead server
-                    self._cleanup_server(normalized)
+            # Double-check under lock
+            if normalized in self._servers and self._servers[normalized]:
+                for instance in self._servers[normalized]:
+                    try:
+                        resp = requests.get(f"{instance['url']}/v1/models", timeout=5)
+                        if resp.status_code == 200:
+                            return True
+                    except requests.RequestException:
+                        continue
+                # All dead, clean up
+                self._cleanup_model_servers(normalized)
 
-            # Start new server
-            port = self._find_free_port()
             tp_size = _estimate_tp_size(model_name, self._gpu_count)
+            gpu_ids = self._gpu_ids
 
-            logger.info(f"Starting SGLang server for {model_name} on port {port} with tp={tp_size}")
+            self._servers[normalized] = []
+            self._rr_counters[normalized] = 0
 
-            cmd = [
-                "python", "-m", "sglang.launch_server",
-                "--model-path", model_name,
-                "--port", str(port),
-                "--tp", str(tp_size),
-                "--host", "0.0.0.0",
-            ]
+            if tp_size == 1 and len(gpu_ids) > 1:
+                # Data parallelism: one server per GPU
+                num_instances = len(gpu_ids)
+                print(f"  [SGLang] Starting {num_instances} instances for {model_name} "
+                      f"(tp=1, data-parallel across GPUs {gpu_ids})")
 
-            # Add memory optimization flags for large models
-            if tp_size >= 2:
-                cmd.extend(["--chunked-prefill-size", "8192"])
+                # Pre-allocate ports to avoid collisions
+                ports = []
+                reserved: Set[int] = set()
+                for _ in gpu_ids:
+                    p = self._find_free_port(reserved=reserved)
+                    ports.append(p)
+                    reserved.add(p)
 
-            try:
-                # Start server process
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
+                ready_count = 0
+
+                # --- Phase 1: Start FIRST instance and wait for it ---
+                # This ensures the model is downloaded/cached before launching
+                # the rest, avoiding concurrent download contention and OOM.
+                first_gpu, first_port = gpu_ids[0], ports[0]
+                print(f"  [SGLang] Phase 1: Starting first instance on GPU {first_gpu} "
+                      f"(downloads & caches model)...")
+                first_info = self._start_single_server(
+                    model_name, tp_size=1, gpu_ids=[first_gpu], port=first_port,
                 )
-
-                url = f"http://localhost:{port}"
-
-                # Wait for server to be ready
-                logger.info(f"Waiting for SGLang server to start (this may take a few minutes)...")
-                if self._wait_for_server(url, process=process, timeout=600):  # 10 min timeout for large models
-                    self._servers[normalized] = {
-                        "process": process,
-                        "port": port,
-                        "url": url,
-                        "model": model_name,
-                    }
-                    logger.info(f"SGLang server ready at {url}")
-                    return url
+                if first_info is not None:
+                    self._servers[normalized].append(first_info)
+                    ready_count += 1
+                    print(f"  [SGLang] First instance ready at {first_info['url']} "
+                          f"({ready_count}/{num_instances})")
                 else:
-                    # If process is still alive, it's a genuine timeout
-                    if process.poll() is None:
-                        logger.error(f"SGLang server failed to start within timeout (600s)")
-                        process.terminate()
-                    # If process already exited, _wait_for_server already logged the error
-                    return None
+                    print(f"  [SGLang] First instance on GPU {first_gpu} failed. "
+                          f"Trying remaining GPUs...")
 
-            except Exception as e:
-                logger.error(f"Failed to start SGLang server: {e}")
-                return None
+                # --- Phase 2: Start remaining instances in parallel ---
+                # Model is now cached on disk, so these load from cache.
+                remaining_gpus = list(zip(gpu_ids[1:], ports[1:]))
+                if remaining_gpus:
+                    print(f"  [SGLang] Phase 2: Starting {len(remaining_gpus)} more instances "
+                          f"in parallel (loading from cache)...")
+
+                    pending = []  # (gpu_id, port, process)
+                    for gpu_id, port in remaining_gpus:
+                        cmd = [
+                            "python", "-m", "sglang.launch_server",
+                            "--model-path", model_name,
+                            "--port", str(port),
+                            "--tp", "1",
+                            "--host", "0.0.0.0",
+                        ]
+                        env = os.environ.copy()
+                        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+                        try:
+                            process = subprocess.Popen(
+                                cmd,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                text=True,
+                                env=env,
+                            )
+                            pending.append((gpu_id, port, process))
+                            logger.info(f"Launched SGLang on GPU {gpu_id}, port {port}")
+                        except Exception as e:
+                            logger.error(f"Failed to launch SGLang on GPU {gpu_id}: {e}")
+
+                    # Wait for all remaining to become healthy
+                    deadline = time.time() + 600
+                    still_pending = list(pending)
+
+                    while still_pending and time.time() < deadline:
+                        remaining = []
+                        for gpu_id, port, process in still_pending:
+                            url = f"http://localhost:{port}"
+                            # Check if process died
+                            if process.poll() is not None:
+                                exit_code = process.returncode
+                                output = ""
+                                try:
+                                    output = process.stdout.read() if process.stdout else ""
+                                except Exception:
+                                    pass
+                                lines = [l for l in output.strip().split("\n") if l.strip()] if output else []
+                                tail = "\n".join(lines[-10:]) if lines else "(no output)"
+                                logger.error(f"SGLang on GPU {gpu_id} died (exit {exit_code}): {tail}")
+                                print(f"  [SGLang] Instance on GPU {gpu_id} failed (exit {exit_code})")
+                                continue
+                            # Check if healthy
+                            try:
+                                resp = requests.get(f"{url}/v1/models", timeout=3)
+                                if resp.status_code == 200:
+                                    self._servers[normalized].append({
+                                        "process": process,
+                                        "port": port,
+                                        "url": url,
+                                        "model": model_name,
+                                        "gpu_ids": [gpu_id],
+                                    })
+                                    ready_count += 1
+                                    print(f"  [SGLang] Instance on GPU {gpu_id} ready at {url} "
+                                          f"({ready_count}/{num_instances})")
+                                    continue
+                            except requests.RequestException:
+                                pass
+                            remaining.append((gpu_id, port, process))
+                        still_pending = remaining
+                        if still_pending:
+                            time.sleep(2)
+
+                    # Kill any still-pending after timeout
+                    for gpu_id, port, process in still_pending:
+                        logger.error(f"SGLang on GPU {gpu_id} timed out, terminating")
+                        process.terminate()
+
+                if not self._servers[normalized]:
+                    logger.error(f"All SGLang instances failed for {model_name}")
+                    del self._servers[normalized]
+                    del self._rr_counters[normalized]
+                    return False
+
+                print(f"  [SGLang] Pool ready: {len(self._servers[normalized])}/{num_instances} instances")
+                return True
+
+            else:
+                # Tensor parallelism or single GPU: one server
+                assigned_gpus = gpu_ids[:tp_size] if tp_size <= len(gpu_ids) else gpu_ids
+                print(f"  [SGLang] Starting 1 instance for {model_name} (tp={tp_size}, GPUs {assigned_gpus})")
+
+                info = self._start_single_server(model_name, tp_size=tp_size, gpu_ids=assigned_gpus)
+                if info is not None:
+                    self._servers[normalized].append(info)
+                    return True
+                else:
+                    del self._servers[normalized]
+                    del self._rr_counters[normalized]
+                    return False
+
+    def ensure_server(self, model_name: str) -> Optional[str]:
+        """Backward-compatible wrapper: ensure pool and return a server URL."""
+        if self.ensure_server_pool(model_name):
+            return self.get_next_server_url(model_name)
+        return None
+
+    def get_next_server_url(self, model_name: str) -> Optional[str]:
+        """Return the next server URL via round-robin.
+
+        Thread-safe: uses CPython GIL for the counter increment.
+        No per-request health check — let _sglang_completion retry handle failures.
+        """
+        normalized = self._normalize_model(model_name)
+        instances = self._servers.get(normalized, [])
+        if not instances:
+            return None
+        n = len(instances)
+        if n == 1:
+            return instances[0]["url"]
+        idx = self._rr_counters.get(normalized, 0)
+        self._rr_counters[normalized] = (idx + 1) % n
+        return instances[idx % n]["url"]
+
+    def _cleanup_model_servers(self, normalized: str):
+        """Clean up ALL server instances for a model."""
+        instances = self._servers.pop(normalized, [])
+        self._rr_counters.pop(normalized, None)
+        for instance in instances:
+            try:
+                instance["process"].terminate()
+                instance["process"].wait(timeout=10)
+            except Exception:
+                try:
+                    instance["process"].kill()
+                except Exception:
+                    pass
+            logger.info(f"Shut down server for {instance['model']} on port {instance['port']}")
 
     def _cleanup_server(self, normalized: str):
-        """Clean up a specific server."""
-        if normalized in self._servers:
-            server = self._servers.pop(normalized)
-            try:
-                server["process"].terminate()
-                server["process"].wait(timeout=10)
-            except Exception:
-                server["process"].kill()
-            logger.info(f"Shut down server for {server['model']}")
+        """Backward compat alias."""
+        self._cleanup_model_servers(normalized)
 
     def shutdown_all(self):
         """Shut down all running servers."""
         with self._lock:
             for normalized in list(self._servers.keys()):
-                self._cleanup_server(normalized)
+                self._cleanup_model_servers(normalized)
 
     def get_server_url(self, model_name: str) -> Optional[str]:
         """Get URL for a running server (doesn't start new ones)."""
         normalized = self._normalize_model(model_name)
-        if normalized in self._servers:
-            return self._servers[normalized]["url"]
+        instances = self._servers.get(normalized, [])
+        if instances:
+            return instances[0]["url"]
         return None
 
     def list_running(self) -> List[Dict[str, Any]]:
-        """List all running servers."""
-        return [
-            {"model": s["model"], "port": s["port"], "url": s["url"]}
-            for s in self._servers.values()
-        ]
+        """List all running server instances."""
+        result = []
+        for instances in self._servers.values():
+            for s in instances:
+                result.append({
+                    "model": s["model"],
+                    "port": s["port"],
+                    "url": s["url"],
+                    "gpu_ids": s.get("gpu_ids", []),
+                })
+        return result
 
 
 # Global server manager (singleton)
@@ -465,24 +684,25 @@ class ModelRouter:
         target, formatted_model = self.get_routing_target(model)
 
         if target == "sglang" and self._server_manager:
-            # Ensure server is running (thread-safe, will reuse existing)
             # Use original model name for HuggingFace path
             original_model = model
             for prefix in ["sglang/", "local/"]:
                 if original_model.lower().startswith(prefix):
                     original_model = original_model[len(prefix):]
 
-            server_url = self._server_manager.ensure_server(original_model)
+            # Ensure server pool is running, then pick next via round-robin
+            pool_ok = self._server_manager.ensure_server_pool(original_model)
 
-            if server_url:
-                logger.info(f"Routing '{model}' to SGLang at {server_url}")
-                try:
-                    return self._sglang_completion(server_url, formatted_model, messages, **kwargs)
-                except Exception as e:
-                    logger.warning(f"SGLang request failed: {e}")
-                    # Fall through to OpenRouter
+            if pool_ok:
+                server_url = self._server_manager.get_next_server_url(original_model)
+                if server_url:
+                    logger.info(f"Routing '{model}' to SGLang at {server_url}")
+                    try:
+                        return self._sglang_completion(server_url, formatted_model, messages, **kwargs)
+                    except Exception as e:
+                        logger.warning(f"SGLang request failed: {e}")
             else:
-                logger.warning(f"Failed to start SGLang server for {model}")
+                logger.warning(f"Failed to start SGLang server pool for {model}")
 
             # Update target for fallback
             target = "openrouter"
@@ -537,6 +757,7 @@ def check_sglang_status() -> Dict[str, Any]:
     manager = get_server_manager()
     return {
         "gpu_count": manager._gpu_count,
+        "gpu_ids": manager._gpu_ids,
         "running_servers": manager.list_running(),
         "auto_deploy": os.getenv("SGLANG_AUTO_DEPLOY", "true").lower() in ("true", "1", "yes"),
     }
@@ -548,19 +769,19 @@ def shutdown_servers():
 
 
 def warmup_local_model(model_name: str) -> bool:
-    """Pre-start SGLang server for a local model before workers spawn.
+    """Pre-start SGLang server pool for a local model before workers spawn.
 
     Call this once on the main thread at startup. If the model is not local
     (closed-source / OpenRouter), this is a no-op.
 
     Returns:
-        True if server is ready, False if model is remote or server failed.
+        True if at least one server is ready, False if remote or all failed.
     """
     if not _is_local_model(model_name):
         print(f"  [Model] '{model_name}' -> remote API (no local GPU needed)")
         return False
 
-    print(f"  [Model] '{model_name}' -> local model, pre-starting SGLang server...")
+    print(f"  [Model] '{model_name}' -> local model, pre-starting SGLang server pool...")
     router = get_router()
     if not router.auto_deploy or not router._server_manager:
         print(f"  [Model] SGLang auto-deploy is disabled (SGLANG_AUTO_DEPLOY=false)")
@@ -572,12 +793,16 @@ def warmup_local_model(model_name: str) -> bool:
         if original.lower().startswith(prefix):
             original = original[len(prefix):]
 
-    url = router._server_manager.ensure_server(original)
-    if url:
-        print(f"  [Model] SGLang server ready at {url}")
+    success = router._server_manager.ensure_server_pool(original)
+    if success:
+        normalized = router._server_manager._normalize_model(original)
+        instances = router._server_manager._servers.get(normalized, [])
+        print(f"  [Model] SGLang server pool ready: {len(instances)} instance(s)")
+        for inst in instances:
+            print(f"    - {inst['url']} (GPU {inst.get('gpu_ids', '?')})")
         return True
     else:
-        print(f"  [Model] SGLang server failed to start, will fallback to OpenRouter")
+        print(f"  [Model] SGLang server pool failed to start, will fallback to OpenRouter")
         return False
 
 
