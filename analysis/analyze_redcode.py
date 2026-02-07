@@ -2,25 +2,41 @@
 """
 Analyze RedCode evaluation results and output as CSV dataframe.
 
-Each row contains score frequencies and rates for a unique combination of:
+Each row contains per-prompt-type score frequencies, refusal rates, and attack
+success rates for a unique combination of:
 - agent_name, model_name, redcode_split, skill_type, mode, is_baseline, dataset_id
 
-The mode field is the unified variant identifier for all skill types:
-- reactive/proactive: "aggregate" or "separate"
-- constitutional: safety standard stems joined by hyphens
-  (e.g., "claudes-constitution-nist_ai_rmf_playbook-owaspai_general_controls")
+Prompt types tracked separately: Code, Code w/ jb, Summary, Details.
+Each gets: s0, s1, s3, RR (refusal rate), ASR (attack success rate).
+An "overall" aggregate across all prompt types is also computed.
 
 Usage:
-    python analysis/analyze_attacks.py
+    python analysis/analyze_redcode.py
 """
 
 import json
 
 import pandas as pd
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
+
+
+# Canonical prompt type keys used in column names
+PROMPT_TYPES = ["code", "code_jb", "summary", "details"]
+
+# Mapping from JSON "Score Distribution" keys to canonical prompt type keys
+PROMPT_TYPE_MAP = {
+    "Code": "code",
+    "Code w/ jb": "code_jb",
+    "Summary": "summary",
+    "Details": "details",
+}
+
+
+def _empty_scores() -> Dict[str, int]:
+    return {"s0": 0, "s1": 0, "s3": 0}
 
 
 @dataclass
@@ -30,17 +46,29 @@ class DataFrameRow:
     model_name: str
     redcode_split: str
     skill_type: str
-    mode: str  # "aggregate", "separate", or constitutional standard stems
-    is_baseline: str  # "yes" or "no"
+    mode: str
+    is_baseline: str
     dataset_id: str
-    score_0: int
-    score_1: int
-    score_3: int
-    refusal_rate: float
-    attack_success_rate: float
+    # Per-prompt-type scores: dict mapping canonical type -> {s0, s1, s3}
+    type_scores: Dict[str, Dict[str, int]] = field(default_factory=dict)
+
+    def _rr(self, scores: Dict[str, int]) -> float:
+        total = scores["s0"] + scores["s1"] + scores["s3"]
+        return scores["s0"] / total if total else 0.0
+
+    def _asr(self, scores: Dict[str, int]) -> float:
+        total = scores["s0"] + scores["s1"] + scores["s3"]
+        return scores["s3"] / total if total else 0.0
+
+    def _overall_scores(self) -> Dict[str, int]:
+        overall = _empty_scores()
+        for scores in self.type_scores.values():
+            for k in ("s0", "s1", "s3"):
+                overall[k] += scores[k]
+        return overall
 
     def to_dict(self) -> Dict:
-        return {
+        d = {
             "agent_name": self.agent_name,
             "model_name": self.model_name,
             "redcode_split": self.redcode_split,
@@ -48,20 +76,34 @@ class DataFrameRow:
             "mode": self.mode,
             "is_baseline": self.is_baseline,
             "dataset_id": self.dataset_id,
-            "score_0": self.score_0,
-            "score_1": self.score_1,
-            "score_3": self.score_3,
-            "refusal_rate": self.refusal_rate,
-            "attack_success_rate": self.attack_success_rate,
         }
+
+        # Per-prompt-type columns
+        for pt in PROMPT_TYPES:
+            scores = self.type_scores.get(pt, _empty_scores())
+            d[f"{pt}_s0"] = scores["s0"]
+            d[f"{pt}_s1"] = scores["s1"]
+            d[f"{pt}_s3"] = scores["s3"]
+            d[f"{pt}_RR"] = self._rr(scores)
+            d[f"{pt}_ASR"] = self._asr(scores)
+
+        # Overall columns
+        overall = self._overall_scores()
+        d["overall_s0"] = overall["s0"]
+        d["overall_s1"] = overall["s1"]
+        d["overall_s3"] = overall["s3"]
+        d["overall_RR"] = self._rr(overall)
+        d["overall_ASR"] = self._asr(overall)
+
+        return d
 
 
 def load_and_process_results(results_dir: Path) -> List[DataFrameRow]:
     """Load all result files and aggregate by unique key."""
     # Key: (agent, model, split, skill, mode, is_baseline, dataset_id)
-    # Value: {score_0, score_1, score_3}
-    aggregated: Dict[tuple, Dict[str, int]] = defaultdict(
-        lambda: {"score_0": 0, "score_1": 0, "score_3": 0}
+    # Value: dict mapping canonical prompt type -> {s0, s1, s3}
+    aggregated: Dict[tuple, Dict[str, Dict[str, int]]] = defaultdict(
+        lambda: {pt: _empty_scores() for pt in PROMPT_TYPES}
     )
 
     if not results_dir.exists():
@@ -69,7 +111,6 @@ def load_and_process_results(results_dir: Path) -> List[DataFrameRow]:
         return []
 
     for json_file in sorted(results_dir.glob("*.json")):
-        # Skip non-result files
         if "comparison" in json_file.name.lower() or "log" in json_file.name.lower():
             continue
 
@@ -79,10 +120,13 @@ def load_and_process_results(results_dir: Path) -> List[DataFrameRow]:
 
     # Convert aggregated data to rows
     rows = []
-    for key, scores in aggregated.items():
+    for key, type_scores in aggregated.items():
         agent, model, split, skill, mode, is_baseline, dataset_id = key
-        total = scores["score_0"] + scores["score_1"] + scores["score_3"]
 
+        # Check if there's any data at all
+        total = sum(
+            s["s0"] + s["s1"] + s["s3"] for s in type_scores.values()
+        )
         if total == 0:
             continue
 
@@ -94,11 +138,7 @@ def load_and_process_results(results_dir: Path) -> List[DataFrameRow]:
             mode=mode,
             is_baseline=is_baseline,
             dataset_id=dataset_id,
-            score_0=scores["score_0"],
-            score_1=scores["score_1"],
-            score_3=scores["score_3"],
-            refusal_rate=scores["score_0"] / total if total else 0.0,
-            attack_success_rate=scores["score_3"] / total if total else 0.0,
+            type_scores=dict(type_scores),
         ))
 
     return rows
@@ -108,10 +148,6 @@ def parse_filename_metadata(filename: str) -> Dict[str, str]:
     """Extract metadata from result filename.
 
     Filename format: {agent}_{model}_{split}_{datasets}_{skill-mode}_{baseline|skill}_run{N}.json
-
-    The skill-mode part uses a hyphen to join skill_type and mode suffix:
-    - reactive-aggregate, proactive-separate
-    - constitutional-claudes-constitution-nist_ai_rmf_playbook-...
     """
     meta = {
         "split": "unknown",
@@ -124,16 +160,11 @@ def parse_filename_metadata(filename: str) -> Dict[str, str]:
     stem = Path(filename).stem
     parts = stem.split("_")
 
-    # Find split (exec/gen)
     for part in parts:
         if part in ("exec", "gen"):
             meta["split"] = part
             break
 
-    # Find skill type and mode (unified: mode contains the suffix for all skill types).
-    # The mode suffix may contain underscores (e.g. nist_ai_rmf_playbook), so we
-    # reconstruct it by joining parts from the skill-type prefix up to the next
-    # known terminator (baseline, skill, run\d+).
     skill_types = ("reactive", "proactive", "constitutional")
     terminators = {"baseline", "skill"}
     for i, part in enumerate(parts):
@@ -151,7 +182,6 @@ def parse_filename_metadata(filename: str) -> Dict[str, str]:
         if found_st:
             meta["skill"] = found_st
             if mode_start is not None:
-                # Collect remaining mode parts until a terminator
                 mode_parts = [mode_start]
                 for j in range(i + 1, len(parts)):
                     if parts[j] in terminators or parts[j].startswith("run"):
@@ -160,7 +190,6 @@ def parse_filename_metadata(filename: str) -> Dict[str, str]:
                 meta["mode"] = "_".join(mode_parts)
             break
 
-    # Baseline status from "_baseline_" or "_skill_" in filename
     if "_baseline_" in filename:
         meta["is_baseline"] = "yes"
     elif "_skill_" in filename:
@@ -175,56 +204,51 @@ def load_single_file(filepath: Path, aggregated: Dict) -> Optional[bool]:
         with open(filepath) as f:
             data = json.load(f)
 
-        # Skip non-result files
         if isinstance(data, list) or "Score Distribution" not in data:
             return None
 
-        # Extract metadata from JSON (agent, model) and filename (split, skill, baseline)
         agent = data.get("Agent", "unknown")
         model = data.get("Model", "unknown")
 
-        # Parse split, skill, and baseline from filename (as fallback)
         filename_meta = parse_filename_metadata(filepath.name)
         split = filename_meta["split"]
 
-        # Prefer JSON metadata if available (new format), fallback to filename parsing
         skill = data.get("Skill Type", filename_meta["skill"])
 
-        # Extract mode from JSON or filename (unified for all skill types)
         mode = data.get("Skill Mode") or filename_meta.get("mode", "")
         if mode is None:
             mode = ""
-        # Handle legacy format where Skill Mode was a list
         if isinstance(mode, list):
             mode = "-".join(Path(f).stem for f in mode) if mode != ["all"] else "all"
 
-        # Get baseline status from JSON or filename
         json_baseline = data.get("Is Baseline")
         if json_baseline is not None:
             is_baseline = "yes" if json_baseline else "no"
         else:
             is_baseline = filename_meta["is_baseline"]
 
-        # Extract dataset_id from Dataset IDs field or filename
         dataset_ids = data.get("Dataset IDs", [])
         if not dataset_ids:
             dataset_ids = [filename_meta.get("dataset_id", "unknown")]
 
-        # Aggregate scores from "Score Distribution"
-        # Each prompt type has a dict like {"0": 15, "3": 10, "1": 5}
         score_by_type = data.get("Score Distribution", {})
         for dataset_id in dataset_ids:
             key = (agent, model, split, skill, mode, is_baseline, str(dataset_id))
 
-            for _prompt_label, score_counts in score_by_type.items():
+            for prompt_label, score_counts in score_by_type.items():
+                canonical = PROMPT_TYPE_MAP.get(prompt_label)
+                if canonical is None:
+                    print(f"  Warning: Unknown prompt type '{prompt_label}' in {filepath.name}, skipping")
+                    continue
+
                 for score_str, count in score_counts.items():
                     score = int(score_str)
                     if score == 0:
-                        aggregated[key]["score_0"] += count
+                        aggregated[key][canonical]["s0"] += count
                     elif score == 1:
-                        aggregated[key]["score_1"] += count
+                        aggregated[key][canonical]["s1"] += count
                     elif score == 3:
-                        aggregated[key]["score_3"] += count
+                        aggregated[key][canonical]["s3"] += count
 
         return True
 
@@ -239,31 +263,42 @@ def print_dataframe(rows: List[DataFrameRow]):
         print("\nNo data to display.")
         return
 
-    print("\n" + "=" * 150)
-    print(f"{'Agent':<15} {'Model':<25} {'Split':<6} {'Skill':<14} {'Mode':<35} {'Base':<5} {'DS':<4} {'S0':<4} {'S1':<4} {'S3':<4} {'RR':>7} {'ASR':>7}")
-    print("=" * 150)
-
-    # Sort rows
     sorted_rows = sorted(rows, key=lambda r: (
         r.agent_name, r.model_name, r.redcode_split, r.skill_type, r.mode, r.is_baseline, r.dataset_id
     ))
 
+    # Print per-prompt-type RR/ASR summary
+    print("\n" + "=" * 180)
+    header = (
+        f"{'Agent':<15} {'Model':<25} {'Split':<6} {'Skill':<14} {'Mode':<25} {'Base':<5} {'DS':<4} "
+        f"{'Code RR':>8} {'Code ASR':>9} "
+        f"{'Jb RR':>7} {'Jb ASR':>8} "
+        f"{'Sum RR':>8} {'Sum ASR':>9} "
+        f"{'Det RR':>8} {'Det ASR':>9} "
+        f"{'All RR':>8} {'All ASR':>9}"
+    )
+    print(header)
+    print("=" * 180)
+
     for r in sorted_rows:
-        # Truncate long fields for display
+        d = r.to_dict()
         model_short = r.model_name[:23] + ".." if len(r.model_name) > 25 else r.model_name
-        mode_short = r.mode[:33] + ".." if len(r.mode) > 35 else r.mode
+        mode_short = r.mode[:23] + ".." if len(r.mode) > 25 else r.mode
         print(
             f"{r.agent_name:<15} {model_short:<25} {r.redcode_split:<6} {r.skill_type:<14} "
-            f"{mode_short:<35} {r.is_baseline:<5} {r.dataset_id:<4} {r.score_0:<4} {r.score_1:<4} {r.score_3:<4} "
-            f"{r.refusal_rate*100:>6.1f}% {r.attack_success_rate*100:>6.1f}%"
+            f"{mode_short:<25} {r.is_baseline:<5} {r.dataset_id:<4} "
+            f"{d['code_RR']*100:>7.1f}% {d['code_ASR']*100:>8.1f}% "
+            f"{d['code_jb_RR']*100:>6.1f}% {d['code_jb_ASR']*100:>7.1f}% "
+            f"{d['summary_RR']*100:>7.1f}% {d['summary_ASR']*100:>8.1f}% "
+            f"{d['details_RR']*100:>7.1f}% {d['details_ASR']*100:>8.1f}% "
+            f"{d['overall_RR']*100:>7.1f}% {d['overall_ASR']*100:>8.1f}%"
         )
 
-    print("=" * 150)
+    print("=" * 180)
     print(f"Total rows: {len(rows)}")
 
 
 def main():
-    # Fixed paths
     repo_root = Path(__file__).parent.parent
     results_dir = repo_root / "results"
     reports_dir = repo_root / "reports"
@@ -271,7 +306,6 @@ def main():
     print()
     print(f"Loading results from: {results_dir}")
 
-    # Load and process
     rows = load_and_process_results(results_dir)
 
     if not rows:
@@ -279,7 +313,6 @@ def main():
         print("  Run evaluations first to generate results.")
         return
 
-    # Print table
     print_dataframe(rows)
 
     # Save as CSV
