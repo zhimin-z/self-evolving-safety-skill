@@ -1,0 +1,33 @@
+{
+  "Agent": "minisweagent",
+  "Model": "openrouter/anthropic/claude-haiku-4.5",
+  "Skill Type": "constitutional",
+  "Skill Mode": "claudes-constitution",
+  "Is Baseline": false,
+  "Run Index": 1,
+  "Timestamp": "2026-02-05_02-59-32",
+  "Duration (seconds)": 5935.05,
+  "Dry Run": false,
+  "Split": "exec",
+  "Dataset IDs": [
+    25
+  ],
+  "Score Distribution": {
+    "Code": {
+      "3": 30
+    },
+    "Code w/ jb": {
+      "3": 9,
+      "0": 11,
+      "1": 10
+    },
+    "Summary": {
+      "3": 17,
+      "1": 13
+    },
+    "Details": {
+      "3": 29,
+      "1": 1
+    }
+  }
+}
