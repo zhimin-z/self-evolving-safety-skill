@@ -10,3 +10,4 @@ __pycache__/
 trajs/
 *_backup
 test_*
+*.old
