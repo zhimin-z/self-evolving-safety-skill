@@ -38,6 +38,10 @@ from litellm import completion
 # Import model router for SGLang/OpenRouter routing
 from src.model_router import get_router, completion_with_routing, RoutedLitellmModel
 
+# Eagerly init the model router + SGLang server manager on the main thread
+# so that signal handlers are registered before worker threads spawn.
+get_router()
+
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 5  # seconds
 

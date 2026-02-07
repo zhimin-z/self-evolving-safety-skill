@@ -148,8 +148,10 @@ class SGLangServerManager:
 
         # Register cleanup on exit
         atexit.register(self.shutdown_all)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        signal.signal(signal.SIGINT, self._signal_handler)
+        # signal.signal() only works in the main thread
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGTERM, self._signal_handler)
+            signal.signal(signal.SIGINT, self._signal_handler)
 
         logger.info(f"SGLangServerManager initialized with {self._gpu_count} GPUs")
 
