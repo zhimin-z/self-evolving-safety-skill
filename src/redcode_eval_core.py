@@ -36,7 +36,7 @@ import dotenv
 from litellm import completion
 
 # Import model router for SGLang/OpenRouter routing
-from src.model_router import get_router, completion_with_routing, RoutedLitellmModel
+from src.model_router import get_router, completion_with_routing, RoutedLitellmModel, _is_local_model
 
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 5  # seconds
@@ -157,15 +157,19 @@ def get_available_gpus() -> List[int]:
         return [0]
 
 
-def get_num_workers() -> int:
-    """Determine number of parallel workers from CUDA_VISIBLE_DEVICES.
+def get_num_workers(model_name: str = "") -> int:
+    """Determine number of parallel workers.
 
-    Re-reads the env var on every call so that changes are picked up
-    between evaluation steps (e.g., a classmate releasing GPUs).
+    - Closed-source models (OpenRouter/Anthropic/OpenAI): returns 1 (sequential).
+      GPUs are irrelevant for remote API calls.
+    - Local models (Qwen/Llama/etc.): returns len(CUDA_VISIBLE_DEVICES).
+      Re-reads the env var on every call so mid-experiment GPU changes are picked up.
 
     Returns:
         Number of workers (>= 1).
     """
+    if model_name and not _is_local_model(model_name):
+        return 1
     gpus = get_available_gpus()
     return max(1, len(gpus))
 CHUNK_SIZE_CHARS = 6000
@@ -807,7 +811,7 @@ def eval_dataset(
 
     # --- Dynamic GPU check ---
     gpus = get_available_gpus()
-    workers = get_num_workers()
+    workers = get_num_workers(model_full_name or "")
     print(f"  [GPU] Available GPUs: {gpus} -> using {workers} worker(s)")
 
     start_time = time.time()
@@ -1456,7 +1460,7 @@ def eval_gen_category(
     """Evaluate agent on RedCode-Gen category (malware code generation)."""
     # --- Dynamic GPU check ---
     gpus = get_available_gpus()
-    workers = get_num_workers()
+    workers = get_num_workers(model_full_name or "")
     print(f"  [GPU] Available GPUs: {gpus} -> using {workers} worker(s)")
 
     start_time = time.time()
@@ -2383,7 +2387,7 @@ def eval_exec_cases(
 
     # --- Dynamic GPU check: re-read CUDA_VISIBLE_DEVICES every time ---
     gpus = get_available_gpus()
-    workers = get_num_workers()
+    workers = get_num_workers(get_model_full_name(config))
     print(f"  [GPU] Available GPUs: {gpus} -> using {workers} worker(s)")
 
     # Trajectory base directory (parallel to results)
@@ -2570,7 +2574,7 @@ def eval_gen_cases(
 
     # --- Dynamic GPU check: re-read CUDA_VISIBLE_DEVICES every time ---
     gpus = get_available_gpus()
-    workers = get_num_workers()
+    workers = get_num_workers(get_model_full_name(config))
     print(f"  [GPU] Available GPUs: {gpus} -> using {workers} worker(s)")
 
     # Trajectory base directory (parallel to results)
