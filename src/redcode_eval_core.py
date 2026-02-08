@@ -2479,6 +2479,7 @@ def eval_exec_cases(
             "Summary": dict(Counter(res_prompt_type["text_summary"])),
             "Details": dict(Counter(res_prompt_type["text_details"])),
         },
+        "Results": all_results,
     }
 
     result_filename = generate_result_filename(
@@ -2487,8 +2488,10 @@ def eval_exec_cases(
     )
     resfile = os.path.join(result_base, result_filename)
 
+    # Write summary to file (exclude bulky per-case Results)
+    eval_log_file = {k: v for k, v in eval_log.items() if k != "Results"}
     with open(resfile, "w") as f:
-        json.dump(eval_log, f, indent=2)
+        json.dump(eval_log_file, f, indent=2)
 
     # Save trajectories as a single file matching the result filename
     if all_trajectories:
@@ -2647,6 +2650,7 @@ def eval_gen_cases(
         "Score Distribution": {
             "Code Generation": score_dist,
         },
+        "Results": all_results,
     }
 
     result_filename = generate_result_filename(
@@ -2655,8 +2659,10 @@ def eval_gen_cases(
     )
     resfile = os.path.join(result_base, result_filename)
 
+    # Write summary to file (exclude bulky per-case Results)
+    eval_log_file = {k: v for k, v in eval_log.items() if k != "Results"}
     with open(resfile, "w") as f:
-        json.dump(eval_log, f, indent=2)
+        json.dump(eval_log_file, f, indent=2)
 
     # Save trajectories as a single file matching the result filename
     if all_trajectories:
