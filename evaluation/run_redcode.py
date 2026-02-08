@@ -53,7 +53,6 @@ from redcode_eval_core import (
     REPO_ROOT,
     SKILL_TYPES,
     AGENT_CONFIGS,
-    DEFAULT_MODEL,
     # Utilities
     load_config,
     get_model_full_name,
@@ -132,7 +131,6 @@ def run_aggregate_experiment(
     model_name: str,
     dry_run: bool,
     agent_type: str = "mini",
-    skill_model: str = None,
 ):
     """Run N iterations of skill generation + evaluation with global 50/50 train/test splits.
 
@@ -271,7 +269,7 @@ def run_aggregate_experiment(
                     output_dir=output_dir,
                     dataset_ids=all_dataset_ids,
                     run_idx=run_idx,
-                    model=skill_model,
+                    model=get_model_full_name(config),
                     skill_mode="aggregate",
                     agent_type=agent_type,
                 )
@@ -284,7 +282,7 @@ def run_aggregate_experiment(
                 output_dir=output_dir,
                 dataset_ids=all_dataset_ids,
                 run_idx=run_idx,
-                model=skill_model,
+                model=get_model_full_name(config),
                 skill_mode="aggregate",
                 agent_type=agent_type,
             )
@@ -413,7 +411,6 @@ def run_separate_experiment(
     model_name: str,
     dry_run: bool,
     agent_type: str = "mini",
-    skill_model: str = None,
 ):
     """Per-dataset skill generation + evaluation with 50/50 train/test splits.
 
@@ -558,7 +555,7 @@ def run_separate_experiment(
                         output_dir=output_dir,
                         dataset_ids=[dataset_id],
                         run_idx=local_run_idx,
-                        model=skill_model,
+                        model=get_model_full_name(config),
                         skill_mode="separate",
                         agent_type=agent_type,
                     )
@@ -571,7 +568,7 @@ def run_separate_experiment(
                     output_dir=output_dir,
                     dataset_ids=[dataset_id],
                     run_idx=local_run_idx,
-                    model=skill_model,
+                    model=get_model_full_name(config),
                     skill_mode="separate",
                     agent_type=agent_type,
                 )
@@ -759,12 +756,6 @@ Output:
         '--timeout', type=int, default=-1,
         help='Override command timeout in seconds'
     )
-    parser.add_argument(
-        '--skill_model', type=str, default=None,
-        help='Model to use for skill generation (teacher model). '
-             'Defaults to openrouter/anthropic/claude-haiku-4.5. '
-             'Should be a capable model, NOT the small model being evaluated.'
-    )
     args = parser.parse_args()
 
     # ================================================================
@@ -798,15 +789,11 @@ Output:
         config["model"]["model_name"] = args.model
         print(f"Model override: {args.model}")
 
-    # Resolve skill generation model (teacher model)
-    skill_model = args.skill_model or DEFAULT_MODEL
-
     agent_name = get_agent_name(config_path)
     model_name = get_model_short_name(config)
     gpus = get_available_gpus()
     print(f"Agent: {agent_name}")
     print(f"Model: {model_name}")
-    print(f"Skill generation model: {skill_model}")
     print(f"Skill: {args.skill}, Mode: {skill_mode}")
     print(f"GPUs: {gpus} ({len(gpus)} visible), Workers: {len(gpus)} (auto from CUDA_VISIBLE_DEVICES)\n")
 
@@ -842,7 +829,6 @@ Output:
             model_name=model_name,
             dry_run=args.dry_run,
             agent_type=args.agent,
-            skill_model=skill_model,
         )
 
     elif args.skill == 'constitutional':
@@ -860,7 +846,7 @@ Output:
             if cached_skill is not None:
                 skill_content = cached_skill
             else:
-                skill_content = generate_skill(args.skill, args.split, dataset_ids, model=skill_model, skill_mode=skill_mode, run_idx=run_idx, agent_type=args.agent)
+                skill_content = generate_skill(args.skill, args.split, dataset_ids, model=get_model_full_name(config), skill_mode=skill_mode, run_idx=run_idx, agent_type=args.agent)
 
             print("=" * 60)
             print(f"Running RedCode evaluation WITH constitutional skill (run {run_idx})")

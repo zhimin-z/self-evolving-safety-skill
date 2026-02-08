@@ -796,14 +796,16 @@ class ModelRouter:
                 server_url = self._server_manager.get_next_server_url(original_model)
                 if server_url:
                     logger.info(f"Routing '{model}' to vLLM at {server_url}")
-                    try:
-                        return self._vllm_completion(server_url, formatted_model, messages, **kwargs)
-                    except Exception as e:
-                        logger.warning(f"vLLM request failed: {e}")
-            else:
-                logger.warning(f"Failed to start vLLM server pool for {model}")
+                    return self._vllm_completion(server_url, formatted_model, messages, **kwargs)
 
-            # Update target for fallback
+            # vLLM failed — only fall back to OpenRouter for models that exist there
+            if _is_local_model(model):
+                raise RuntimeError(
+                    f"vLLM server pool not available for local model '{model}'. "
+                    f"Cannot fall back to OpenRouter for local-only models."
+                )
+
+            logger.warning(f"vLLM unavailable for {model}, falling back to OpenRouter")
             target = "openrouter"
             if not model.startswith("openrouter/"):
                 formatted_model = f"openrouter/{model}"
