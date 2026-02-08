@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import os
-os.environ.setdefault("SGLANG_DISABLE_CUDNN_CHECK", "1")
+os.environ.setdefault("VLLM_DISABLE_CUDNN_CHECK", "1")
 """
 RedCode evaluation script with optional skill generation.
 
@@ -798,7 +798,7 @@ Output:
     print(f"GPUs: {gpus} ({len(gpus)} visible), Workers: {len(gpus)} (auto from CUDA_VISIBLE_DEVICES)\n")
 
     # ================================================================
-    # Pre-warm SGLang server for local models (downloads + loads once)
+    # Pre-warm vLLM server for local models (downloads + loads once)
     # ================================================================
     full_model = get_model_full_name(config)
     warmup_local_model(full_model)

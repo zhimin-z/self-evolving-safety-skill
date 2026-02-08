@@ -35,7 +35,7 @@ import yaml
 import dotenv
 from litellm import completion
 
-# Import model router for SGLang/OpenRouter routing
+# Import model router for vLLM/OpenRouter routing
 from src.model_router import get_router, completion_with_routing, RoutedLitellmModel, _is_local_model, warmup_local_model
 
 MAX_RETRIES = 3
@@ -43,9 +43,9 @@ RETRY_BASE_DELAY = 5  # seconds
 
 
 def completion_with_retry(max_retries: int = MAX_RETRIES, **kwargs):
-    """Call completion with routing (SGLang -> OpenRouter fallback) and retry.
+    """Call completion with routing (vLLM -> OpenRouter fallback) and retry.
 
-    Routes to SGLang if model is available locally, otherwise falls back to OpenRouter.
+    Routes to vLLM if model is available locally, otherwise falls back to OpenRouter.
     """
     for attempt in range(1, max_retries + 1):
         try:
@@ -72,7 +72,7 @@ def get_routed_model(model_name: str) -> str:
     """Get the properly formatted model name based on routing.
 
     Returns the model name formatted for the appropriate backend:
-    - If available on SGLang: returns the normalized model name
+    - If available on vLLM: returns the normalized model name
     - Otherwise: returns with 'openrouter/' prefix for OpenRouter
     """
     router = get_router()
@@ -82,7 +82,7 @@ def get_routed_model(model_name: str) -> str:
 
 # Alias for backward compatibility
 def get_openrouter_model(model_name: str) -> str:
-    """Legacy function - now routes to SGLang or OpenRouter based on availability."""
+    """Legacy function - now routes to vLLM or OpenRouter based on availability."""
     return get_routed_model(model_name)
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -494,7 +494,7 @@ def build_agent(
     # Handle SWE-agent
     if agent_type == "swe":
         return SWEAgentWrapper(config, container, step_limit, timeout_override)
-    # Setup model with routing (SGLang -> OpenRouter fallback)
+    # Setup model with routing (vLLM -> OpenRouter fallback)
     model_cfg = config.get("model", {})
     model = RoutedLitellmModel(
         model_name=model_cfg.get("model_name", DEFAULT_MODEL),

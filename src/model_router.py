@@ -1,8 +1,8 @@
 """
-Model Router: Routes LLM requests to SGLang (local) or OpenRouter (remote).
+Model Router: Routes LLM requests to vLLM (local) or OpenRouter (remote).
 
 Features:
-- Auto-deploys SGLang server on-demand when local models are requested
+- Auto-deploys vLLM server on-demand when local models are requested
 - Thread-safe server management (no race conditions)
 - Automatic GPU detection for tensor parallelism
 - Falls back to OpenRouter for closed-source or unavailable models
@@ -24,7 +24,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
-# Models that should be routed to local SGLang (open-source models)
+# Models that should be routed to local vLLM (open-source models)
 # Add model patterns here - supports prefix matching
 LOCAL_MODEL_PATTERNS = [
     "qwen/",
@@ -57,7 +57,7 @@ def _is_local_model(model_name: str) -> bool:
     normalized = model_name.lower()
 
     # Remove common prefixes
-    for prefix in ["openrouter/", "sglang/", "local/"]:
+    for prefix in ["openrouter/", "vllm/", "sglang/", "local/"]:
         if normalized.startswith(prefix):
             normalized = normalized[len(prefix):]
 
@@ -155,9 +155,9 @@ def _estimate_tp_size(model_name: str, gpu_count: int) -> int:
     return 1
 
 
-class SGLangServerManager:
+class VLLMServerManager:
     """
-    Manages SGLang server lifecycle with thread-safe operations.
+    Manages vLLM server lifecycle with thread-safe operations.
 
     Ensures only one server runs per model, handles startup/shutdown,
     and provides health checking.
@@ -179,17 +179,17 @@ class SGLangServerManager:
             signal.signal(signal.SIGTERM, self._signal_handler)
             signal.signal(signal.SIGINT, self._signal_handler)
 
-        logger.info(f"SGLangServerManager initialized with {self._gpu_count} GPUs (IDs: {self._gpu_ids})")
+        logger.info(f"VLLMServerManager initialized with {self._gpu_count} GPUs (IDs: {self._gpu_ids})")
 
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully."""
-        logger.info(f"Received signal {signum}, shutting down servers...")
+        logger.info(f"Received signal {signum}, shutting down vLLM servers...")
         self.shutdown_all()
 
     def _normalize_model(self, model_name: str) -> str:
         """Normalize model name for consistent key lookup."""
         normalized = model_name.lower()
-        for prefix in ["openrouter/", "sglang/", "local/"]:
+        for prefix in ["openrouter/", "vllm/", "sglang/", "local/"]:
             if normalized.startswith(prefix):
                 normalized = normalized[len(prefix):]
         return normalized
@@ -229,11 +229,11 @@ class SGLangServerManager:
                 lines = [l for l in output.strip().split("\n") if l.strip()] if output else []
                 tail = "\n".join(lines[-20:]) if lines else "(no output captured)"
                 logger.error(
-                    f"SGLang server process exited with code {exit_code}. "
+                    f"vLLM server process exited with code {exit_code}. "
                     f"Last output:\n{tail}"
                 )
                 print(
-                    f"\n  [SGLang ERROR] Server process died (exit code {exit_code}).\n"
+                    f"\n  [vLLM ERROR] Server process died (exit code {exit_code}).\n"
                     f"  Last output:\n{tail}\n"
                 )
                 return False
@@ -253,7 +253,7 @@ class SGLangServerManager:
         if current_env != self._gpu_env_snapshot:
             logger.info(
                 f"GPU set changed: '{self._gpu_env_snapshot}' -> '{current_env}'. "
-                f"Restarting all SGLang servers."
+                f"Restarting all vLLM servers."
             )
             for normalized in list(self._servers.keys()):
                 self._cleanup_model_servers(normalized)
@@ -268,7 +268,7 @@ class SGLangServerManager:
         gpu_ids: Optional[List[int]] = None,
         port: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Launch one SGLang server instance, optionally pinned to specific GPU(s).
+        """Launch one vLLM server instance, optionally pinned to specific GPU(s).
 
         Args:
             model_name: HuggingFace model path
@@ -283,21 +283,22 @@ class SGLangServerManager:
             port = self._find_free_port()
 
         cmd = [
-            "python", "-m", "sglang.launch_server",
-            "--model-path", model_name,
+            "python", "-m", "vllm.entrypoints.openai.api_server",
+            "--model", model_name,
             "--port", str(port),
-            "--tp", str(tp_size),
+            "--tensor-parallel-size", str(tp_size),
             "--host", "0.0.0.0",
+            "--trust-remote-code",
         ]
         if tp_size >= 2:
-            cmd.extend(["--chunked-prefill-size", "8192"])
+            cmd.append("--enable-chunked-prefill")
 
         env = os.environ.copy()
         if gpu_ids is not None:
             env["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
 
         gpu_label = gpu_ids if gpu_ids else "all"
-        logger.info(f"Starting SGLang for {model_name} on port {port}, tp={tp_size}, gpus={gpu_label}")
+        logger.info(f"Starting vLLM for {model_name} on port {port}, tp={tp_size}, gpus={gpu_label}")
 
         try:
             process = subprocess.Popen(
@@ -317,15 +318,15 @@ class SGLangServerManager:
                     "model": model_name,
                     "gpu_ids": gpu_ids or [],
                 }
-                logger.info(f"SGLang server ready at {url} (gpus={gpu_label})")
+                logger.info(f"vLLM server ready at {url} (gpus={gpu_label})")
                 return info
             else:
                 if process.poll() is None:
-                    logger.error(f"SGLang server on port {port} failed to start within timeout")
+                    logger.error(f"vLLM server on port {port} failed to start within timeout")
                     process.terminate()
                 return None
         except Exception as e:
-            logger.error(f"Failed to start SGLang server: {e}")
+            logger.error(f"Failed to start vLLM server: {e}")
             return None
 
     def ensure_server_pool(self, model_name: str) -> bool:
@@ -372,7 +373,7 @@ class SGLangServerManager:
             if tp_size == 1 and len(gpu_ids) > 1:
                 # Data parallelism: one server per GPU
                 num_instances = len(gpu_ids)
-                print(f"  [SGLang] Starting {num_instances} instances for {model_name} "
+                print(f"  [vLLM] Starting {num_instances} instances for {model_name} "
                       f"(tp=1, data-parallel across GPUs {gpu_ids})")
 
                 # Pre-allocate ports to avoid collisions
@@ -389,7 +390,7 @@ class SGLangServerManager:
                 # This ensures the model is downloaded/cached before launching
                 # the rest, avoiding concurrent download contention and OOM.
                 first_gpu, first_port = gpu_ids[0], ports[0]
-                print(f"  [SGLang] Phase 1: Starting first instance on GPU {first_gpu} "
+                print(f"  [vLLM] Phase 1: Starting first instance on GPU {first_gpu} "
                       f"(downloads & caches model)...")
                 first_info = self._start_single_server(
                     model_name, tp_size=1, gpu_ids=[first_gpu], port=first_port,
@@ -397,27 +398,28 @@ class SGLangServerManager:
                 if first_info is not None:
                     self._servers[normalized].append(first_info)
                     ready_count += 1
-                    print(f"  [SGLang] First instance ready at {first_info['url']} "
+                    print(f"  [vLLM] First instance ready at {first_info['url']} "
                           f"({ready_count}/{num_instances})")
                 else:
-                    print(f"  [SGLang] First instance on GPU {first_gpu} failed. "
+                    print(f"  [vLLM] First instance on GPU {first_gpu} failed. "
                           f"Trying remaining GPUs...")
 
                 # --- Phase 2: Start remaining instances in parallel ---
                 # Model is now cached on disk, so these load from cache.
                 remaining_gpus = list(zip(gpu_ids[1:], ports[1:]))
                 if remaining_gpus:
-                    print(f"  [SGLang] Phase 2: Starting {len(remaining_gpus)} more instances "
+                    print(f"  [vLLM] Phase 2: Starting {len(remaining_gpus)} more instances "
                           f"in parallel (loading from cache)...")
 
                     pending = []  # (gpu_id, port, process)
                     for gpu_id, port in remaining_gpus:
                         cmd = [
-                            "python", "-m", "sglang.launch_server",
-                            "--model-path", model_name,
+                            "python", "-m", "vllm.entrypoints.openai.api_server",
+                            "--model", model_name,
                             "--port", str(port),
-                            "--tp", "1",
+                            "--tensor-parallel-size", "1",
                             "--host", "0.0.0.0",
+                            "--trust-remote-code",
                         ]
                         env = os.environ.copy()
                         env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
@@ -430,9 +432,9 @@ class SGLangServerManager:
                                 env=env,
                             )
                             pending.append((gpu_id, port, process))
-                            logger.info(f"Launched SGLang on GPU {gpu_id}, port {port}")
+                            logger.info(f"Launched vLLM on GPU {gpu_id}, port {port}")
                         except Exception as e:
-                            logger.error(f"Failed to launch SGLang on GPU {gpu_id}: {e}")
+                            logger.error(f"Failed to launch vLLM on GPU {gpu_id}: {e}")
 
                     # Wait for all remaining to become healthy
                     deadline = time.time() + 600
@@ -452,8 +454,8 @@ class SGLangServerManager:
                                     pass
                                 lines = [l for l in output.strip().split("\n") if l.strip()] if output else []
                                 tail = "\n".join(lines[-10:]) if lines else "(no output)"
-                                logger.error(f"SGLang on GPU {gpu_id} died (exit {exit_code}): {tail}")
-                                print(f"  [SGLang] Instance on GPU {gpu_id} failed (exit {exit_code})")
+                                logger.error(f"vLLM on GPU {gpu_id} died (exit {exit_code}): {tail}")
+                                print(f"  [vLLM] Instance on GPU {gpu_id} failed (exit {exit_code})")
                                 continue
                             # Check if healthy
                             try:
@@ -467,7 +469,7 @@ class SGLangServerManager:
                                         "gpu_ids": [gpu_id],
                                     })
                                     ready_count += 1
-                                    print(f"  [SGLang] Instance on GPU {gpu_id} ready at {url} "
+                                    print(f"  [vLLM] Instance on GPU {gpu_id} ready at {url} "
                                           f"({ready_count}/{num_instances})")
                                     continue
                             except requests.RequestException:
@@ -479,22 +481,22 @@ class SGLangServerManager:
 
                     # Kill any still-pending after timeout
                     for gpu_id, port, process in still_pending:
-                        logger.error(f"SGLang on GPU {gpu_id} timed out, terminating")
+                        logger.error(f"vLLM on GPU {gpu_id} timed out, terminating")
                         process.terminate()
 
                 if not self._servers[normalized]:
-                    logger.error(f"All SGLang instances failed for {model_name}")
+                    logger.error(f"All vLLM instances failed for {model_name}")
                     del self._servers[normalized]
                     del self._rr_counters[normalized]
                     return False
 
-                print(f"  [SGLang] Pool ready: {len(self._servers[normalized])}/{num_instances} instances")
+                print(f"  [vLLM] Pool ready: {len(self._servers[normalized])}/{num_instances} instances")
                 return True
 
             else:
                 # Tensor parallelism or single GPU: one server
                 assigned_gpus = gpu_ids[:tp_size] if tp_size <= len(gpu_ids) else gpu_ids
-                print(f"  [SGLang] Starting 1 instance for {model_name} (tp={tp_size}, GPUs {assigned_gpus})")
+                print(f"  [vLLM] Starting 1 instance for {model_name} (tp={tp_size}, GPUs {assigned_gpus})")
 
                 info = self._start_single_server(model_name, tp_size=tp_size, gpu_ids=assigned_gpus)
                 if info is not None:
@@ -515,7 +517,7 @@ class SGLangServerManager:
         """Return the next server URL via round-robin.
 
         Thread-safe: uses CPython GIL for the counter increment.
-        No per-request health check — let _sglang_completion retry handle failures.
+        No per-request health check — let _vllm_completion retry handle failures.
         """
         normalized = self._normalize_model(model_name)
         instances = self._servers.get(normalized, [])
@@ -576,22 +578,22 @@ class SGLangServerManager:
 
 
 # Global server manager (singleton)
-_server_manager: Optional[SGLangServerManager] = None
+_server_manager: Optional[VLLMServerManager] = None
 _server_manager_lock = threading.Lock()
 
 
-def get_server_manager() -> SGLangServerManager:
+def get_server_manager() -> VLLMServerManager:
     """Get or create the global server manager."""
     global _server_manager
     if _server_manager is None:
         with _server_manager_lock:
             if _server_manager is None:
-                _server_manager = SGLangServerManager()
+                _server_manager = VLLMServerManager()
     return _server_manager
 
 
 class ModelRouter:
-    """Routes model requests to SGLang or OpenRouter based on availability."""
+    """Routes model requests to vLLM (local) or OpenRouter (remote) based on availability."""
 
     def __init__(
         self,
@@ -602,7 +604,7 @@ class ModelRouter:
         Initialize the model router.
 
         Args:
-            auto_deploy: Whether to auto-deploy SGLang for local models (default: True)
+            auto_deploy: Whether to auto-deploy vLLM for local models (default: True)
             cache_ttl: Seconds to cache the model list (default: 300)
         """
         self.auto_deploy = auto_deploy
@@ -612,7 +614,7 @@ class ModelRouter:
     def _normalize_model_name(self, model_name: str) -> str:
         """Normalize model name for comparison."""
         name = model_name.lower()
-        for prefix in ["openrouter/", "sglang/", "local/"]:
+        for prefix in ["openrouter/", "vllm/", "sglang/", "local/"]:
             if name.startswith(prefix):
                 name = name[len(prefix):]
         return name
@@ -625,7 +627,7 @@ class ModelRouter:
             model_name: The requested model name
 
         Returns:
-            Tuple of (target, formatted_model_name) where target is "sglang" or "openrouter"
+            Tuple of (target, formatted_model_name) where target is "vllm" or "openrouter"
         """
         # Check if explicitly requesting OpenRouter
         if model_name.startswith("openrouter/"):
@@ -633,7 +635,7 @@ class ModelRouter:
 
         # Check if this is a local-deployable model
         if self.auto_deploy and _is_local_model(model_name):
-            return "sglang", self._normalize_model_name(model_name)
+            return "vllm", self._normalize_model_name(model_name)
 
         # Fall back to OpenRouter
         if not model_name.startswith("openrouter/"):
@@ -644,14 +646,14 @@ class ModelRouter:
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
     )
-    def _sglang_completion(
+    def _vllm_completion(
         self,
         url: str,
         model: str,
         messages: List[Dict[str, Any]],
         **kwargs,
     ) -> Any:
-        """Make a completion request to SGLang server."""
+        """Make a completion request to vLLM server."""
         response = requests.post(
             f"{url}/v1/chat/completions",
             json={
@@ -683,10 +685,10 @@ class ModelRouter:
         """
         target, formatted_model = self.get_routing_target(model)
 
-        if target == "sglang" and self._server_manager:
+        if target == "vllm" and self._server_manager:
             # Use original model name for HuggingFace path
             original_model = model
-            for prefix in ["sglang/", "local/"]:
+            for prefix in ["vllm/", "sglang/", "local/"]:
                 if original_model.lower().startswith(prefix):
                     original_model = original_model[len(prefix):]
 
@@ -696,13 +698,13 @@ class ModelRouter:
             if pool_ok:
                 server_url = self._server_manager.get_next_server_url(original_model)
                 if server_url:
-                    logger.info(f"Routing '{model}' to SGLang at {server_url}")
+                    logger.info(f"Routing '{model}' to vLLM at {server_url}")
                     try:
-                        return self._sglang_completion(server_url, formatted_model, messages, **kwargs)
+                        return self._vllm_completion(server_url, formatted_model, messages, **kwargs)
                     except Exception as e:
-                        logger.warning(f"SGLang request failed: {e}")
+                        logger.warning(f"vLLM request failed: {e}")
             else:
-                logger.warning(f"Failed to start SGLang server pool for {model}")
+                logger.warning(f"Failed to start vLLM server pool for {model}")
 
             # Update target for fallback
             target = "openrouter"
@@ -728,7 +730,7 @@ def get_router() -> ModelRouter:
     """Get or create the global model router instance."""
     global _router
     if _router is None:
-        auto_deploy = os.getenv("SGLANG_AUTO_DEPLOY", "true").lower() in ("true", "1", "yes")
+        auto_deploy = os.getenv("VLLM_AUTO_DEPLOY", "true").lower() in ("true", "1", "yes")
         _router = ModelRouter(auto_deploy=auto_deploy)
     return _router
 
@@ -752,24 +754,24 @@ def completion_with_routing(
     return get_router().completion(model, messages, **kwargs)
 
 
-def check_sglang_status() -> Dict[str, Any]:
-    """Check SGLang server status and running servers."""
+def check_vllm_status() -> Dict[str, Any]:
+    """Check vLLM server status and running servers."""
     manager = get_server_manager()
     return {
         "gpu_count": manager._gpu_count,
         "gpu_ids": manager._gpu_ids,
         "running_servers": manager.list_running(),
-        "auto_deploy": os.getenv("SGLANG_AUTO_DEPLOY", "true").lower() in ("true", "1", "yes"),
+        "auto_deploy": os.getenv("VLLM_AUTO_DEPLOY", "true").lower() in ("true", "1", "yes"),
     }
 
 
 def shutdown_servers():
-    """Manually shut down all SGLang servers."""
+    """Manually shut down all vLLM servers."""
     get_server_manager().shutdown_all()
 
 
 def warmup_local_model(model_name: str) -> bool:
-    """Pre-start SGLang server pool for a local model before workers spawn.
+    """Pre-start vLLM server pool for a local model before workers spawn.
 
     Call this once on the main thread at startup. If the model is not local
     (closed-source / OpenRouter), this is a no-op.
@@ -781,15 +783,15 @@ def warmup_local_model(model_name: str) -> bool:
         print(f"  [Model] '{model_name}' -> remote API (no local GPU needed)")
         return False
 
-    print(f"  [Model] '{model_name}' -> local model, pre-starting SGLang server pool...")
+    print(f"  [Model] '{model_name}' -> local model, pre-starting vLLM server pool...")
     router = get_router()
     if not router.auto_deploy or not router._server_manager:
-        print(f"  [Model] SGLang auto-deploy is disabled (SGLANG_AUTO_DEPLOY=false)")
+        print(f"  [Model] vLLM auto-deploy is disabled (VLLM_AUTO_DEPLOY=false)")
         return False
 
     # Strip routing prefixes to get HuggingFace model path
     original = model_name
-    for prefix in ["openrouter/", "sglang/", "local/"]:
+    for prefix in ["openrouter/", "vllm/", "sglang/", "local/"]:
         if original.lower().startswith(prefix):
             original = original[len(prefix):]
 
@@ -797,12 +799,12 @@ def warmup_local_model(model_name: str) -> bool:
     if success:
         normalized = router._server_manager._normalize_model(original)
         instances = router._server_manager._servers.get(normalized, [])
-        print(f"  [Model] SGLang server pool ready: {len(instances)} instance(s)")
+        print(f"  [Model] vLLM server pool ready: {len(instances)} instance(s)")
         for inst in instances:
             print(f"    - {inst['url']} (GPU {inst.get('gpu_ids', '?')})")
         return True
     else:
-        print(f"  [Model] SGLang server pool failed to start, will fallback to OpenRouter")
+        print(f"  [Model] vLLM server pool failed to start, will fallback to OpenRouter")
         return False
 
 
@@ -811,7 +813,7 @@ class RoutedLitellmModel:
     A LitellmModel-compatible class that routes requests through ModelRouter.
 
     This class provides the same interface as minisweagent's LitellmModel but
-    routes requests to SGLang when available, falling back to OpenRouter.
+    routes requests to vLLM when available, falling back to OpenRouter.
     """
 
     def __init__(
@@ -861,7 +863,7 @@ class RoutedLitellmModel:
             **merged_kwargs,
         )
 
-        # Handle both dict (SGLang raw response) and litellm response object
+        # Handle both dict (vLLM raw response) and litellm response object
         if isinstance(response, dict):
             content = response["choices"][0]["message"]["content"] or ""
             response_dump = response
@@ -906,7 +908,7 @@ if __name__ == "__main__":
 
     # Check status
     print("\n1. Checking system status...")
-    status = check_sglang_status()
+    status = check_vllm_status()
     print(f"   GPU count: {status['gpu_count']}")
     print(f"   Auto-deploy enabled: {status['auto_deploy']}")
     print(f"   Running servers: {status['running_servers']}")
@@ -916,11 +918,11 @@ if __name__ == "__main__":
     router = get_router()
 
     test_models = [
-        ("qwen/Qwen2.5-Coder-7B-Instruct", "Should route to SGLang (local)"),
-        ("meta-llama/Llama-3.1-8B-Instruct", "Should route to SGLang (local)"),
+        ("qwen/Qwen2.5-Coder-7B-Instruct", "Should route to vLLM (local)"),
+        ("meta-llama/Llama-3.1-8B-Instruct", "Should route to vLLM (local)"),
         ("anthropic/claude-haiku-4.5", "Should route to OpenRouter (closed-source)"),
         ("openrouter/anthropic/claude-sonnet-4.5", "Should route to OpenRouter (explicit)"),
-        ("deepseek-ai/DeepSeek-Coder-V2", "Should route to SGLang (local)"),
+        ("deepseek-ai/DeepSeek-Coder-V2", "Should route to vLLM (local)"),
     ]
 
     for model, expected in test_models:
@@ -930,7 +932,7 @@ if __name__ == "__main__":
         print(f"      Expected: {expected}")
 
     print("\n3. To test actual deployment, run with a local model:")
-    print("   SGLANG_AUTO_DEPLOY=true python -c \"")
+    print("   VLLM_AUTO_DEPLOY=true python -c \"")
     print("   from src.model_router import completion_with_routing")
     print("   resp = completion_with_routing('qwen/Qwen2.5-Coder-7B-Instruct', [{'role': 'user', 'content': 'Hi'}])")
     print("   print(resp)\"")
