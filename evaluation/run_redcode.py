@@ -801,7 +801,15 @@ Output:
     # Pre-warm vLLM server for local models (downloads + loads once)
     # ================================================================
     full_model = get_model_full_name(config)
-    warmup_local_model(full_model)
+    if not warmup_local_model(full_model):
+        # warmup_local_model returns False for remote models (expected) and
+        # for local models that failed to start (fatal). Check which case.
+        from model_router import _is_local_model
+        if _is_local_model(full_model):
+            print(f"\nFATAL: vLLM server failed to start for local model '{full_model}'.")
+            print("Fix the GPU/model/vLLM issue before running evaluation.")
+            print("(Running 1620 cases with a broken vLLM just retries the crash each time.)")
+            sys.exit(1)
 
     # ================================================================
     # Route based on skill type

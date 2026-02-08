@@ -163,11 +163,13 @@ class VLLMServerManager:
     and provides health checking.
     """
 
-    def __init__(self, base_port: int = 30000):
+    def __init__(self, base_port: int = 30000, failure_cooldown: int = 300):
         self.base_port = base_port
         self._lock = threading.Lock()
         self._servers: Dict[str, List[Dict[str, Any]]] = {}  # model -> list of {process, port, url, gpu_ids}
         self._rr_counters: Dict[str, int] = {}  # model -> round-robin counter
+        self._failed_models: Dict[str, float] = {}  # model -> timestamp of last failure
+        self._failure_cooldown = failure_cooldown  # seconds before retrying a failed model
         self._gpu_count = _get_gpu_count()
         self._gpu_ids = _get_gpu_ids()
         self._gpu_env_snapshot = _get_cuda_visible_devices()  # track GPU set at launch
@@ -339,6 +341,19 @@ class VLLMServerManager:
         """
         normalized = self._normalize_model(model_name)
 
+        # Fast-fail: skip models that recently failed to start
+        if normalized in self._failed_models:
+            elapsed = time.time() - self._failed_models[normalized]
+            if elapsed < self._failure_cooldown:
+                logger.debug(
+                    f"Skipping {model_name}: startup failed {elapsed:.0f}s ago "
+                    f"(cooldown {self._failure_cooldown}s)"
+                )
+                return False
+            else:
+                # Cooldown expired, allow retry
+                del self._failed_models[normalized]
+
         # Fast path: pool already exists with healthy servers
         if normalized in self._servers and self._servers[normalized]:
             for instance in self._servers[normalized]:
@@ -488,6 +503,7 @@ class VLLMServerManager:
                     logger.error(f"All vLLM instances failed for {model_name}")
                     del self._servers[normalized]
                     del self._rr_counters[normalized]
+                    self._failed_models[normalized] = time.time()
                     return False
 
                 print(f"  [vLLM] Pool ready: {len(self._servers[normalized])}/{num_instances} instances")
@@ -505,6 +521,7 @@ class VLLMServerManager:
                 else:
                     del self._servers[normalized]
                     del self._rr_counters[normalized]
+                    self._failed_models[normalized] = time.time()
                     return False
 
     def ensure_server(self, model_name: str) -> Optional[str]:
