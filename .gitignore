@@ -7,7 +7,7 @@
 __pycache__/
 *.py[cod]
 
-trajs*
+trajs/
 *_backup
 test_*
 *.old
