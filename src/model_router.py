@@ -309,6 +309,7 @@ class VLLMServerManager:
                 stderr=subprocess.STDOUT,
                 text=True,
                 env=env,
+                start_new_session=True,
             )
             url = f"http://localhost:{port}"
 
@@ -325,7 +326,7 @@ class VLLMServerManager:
             else:
                 if process.poll() is None:
                     logger.error(f"vLLM server on port {port} failed to start within timeout")
-                    process.terminate()
+                    self._kill_process_group(process)
                 return None
         except Exception as e:
             logger.error(f"Failed to start vLLM server: {e}")
@@ -381,6 +382,10 @@ class VLLMServerManager:
 
             tp_size = _estimate_tp_size(model_name, self._gpu_count)
             gpu_ids = self._gpu_ids
+
+            # Pre-cleanup: kill any orphaned vLLM processes on target GPUs
+            # (e.g. EngineCore children from a previous crashed server)
+            self._kill_orphan_vllm_on_gpus(gpu_ids)
 
             self._servers[normalized] = []
             self._rr_counters[normalized] = 0
@@ -445,6 +450,7 @@ class VLLMServerManager:
                                 stderr=subprocess.STDOUT,
                                 text=True,
                                 env=env,
+                                start_new_session=True,
                             )
                             pending.append((gpu_id, port, process))
                             logger.info(f"Launched vLLM on GPU {gpu_id}, port {port}")
@@ -497,7 +503,7 @@ class VLLMServerManager:
                     # Kill any still-pending after timeout
                     for gpu_id, port, process in still_pending:
                         logger.error(f"vLLM on GPU {gpu_id} timed out, terminating")
-                        process.terminate()
+                        self._kill_process_group(process)
 
                 if not self._servers[normalized]:
                     logger.error(f"All vLLM instances failed for {model_name}")
@@ -547,20 +553,94 @@ class VLLMServerManager:
         self._rr_counters[normalized] = (idx + 1) % n
         return instances[idx % n]["url"]
 
+    @staticmethod
+    def _kill_process_group(process: subprocess.Popen):
+        """Kill an entire process group (catches child EngineCore processes)."""
+        try:
+            pgid = os.getpgid(process.pid)
+            os.killpg(pgid, signal.SIGTERM)
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(pgid, signal.SIGKILL)
+                process.wait(timeout=5)
+        except (ProcessLookupError, OSError):
+            # Process/group already dead
+            try:
+                process.kill()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _kill_orphan_vllm_on_gpus(gpu_ids: List[int]):
+        """Kill any orphaned vLLM EngineCore processes on the given GPUs.
+
+        After a vLLM API server crashes, its child EngineCore processes can
+        become orphaned and continue holding GPU memory.  This scans for and
+        kills them so the GPUs are actually free for a restart.
+        """
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-compute-apps=pid,gpu_bus_id",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode != 0:
+                return
+
+            # Map GPU index → bus_id
+            bus_result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=index,gpu_bus_id",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if bus_result.returncode != 0:
+                return
+
+            target_buses = set()
+            for line in bus_result.stdout.strip().split("\n"):
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) == 2:
+                    idx = int(parts[0])
+                    if idx in gpu_ids:
+                        target_buses.add(parts[1])
+
+            killed = 0
+            for line in result.stdout.strip().split("\n"):
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) == 2:
+                    pid_str, bus_id = parts
+                    if bus_id in target_buses:
+                        try:
+                            pid = int(pid_str)
+                            # Verify it's actually a vLLM process before killing
+                            cmd_result = subprocess.run(
+                                ["ps", "-p", str(pid), "-o", "comm="],
+                                capture_output=True, text=True, timeout=5,
+                            )
+                            if "vllm" in cmd_result.stdout.lower() or "python" in cmd_result.stdout.lower():
+                                os.kill(pid, signal.SIGKILL)
+                                killed += 1
+                        except (ProcessLookupError, ValueError, OSError):
+                            pass
+            if killed:
+                logger.info(f"Killed {killed} orphaned vLLM process(es) on GPUs {gpu_ids}")
+                time.sleep(3)  # Give GPU memory time to be freed
+        except Exception as e:
+            logger.warning(f"Orphan cleanup failed (non-fatal): {e}")
+
     def _cleanup_model_servers(self, normalized: str):
-        """Clean up ALL server instances for a model."""
+        """Clean up ALL server instances for a model, including child processes."""
         instances = self._servers.pop(normalized, [])
         self._rr_counters.pop(normalized, None)
+        all_gpu_ids = []
         for instance in instances:
-            try:
-                instance["process"].terminate()
-                instance["process"].wait(timeout=10)
-            except Exception:
-                try:
-                    instance["process"].kill()
-                except Exception:
-                    pass
+            self._kill_process_group(instance["process"])
+            all_gpu_ids.extend(instance.get("gpu_ids", []))
             logger.info(f"Shut down server for {instance['model']} on port {instance['port']}")
+        # Also kill any orphaned EngineCore processes on those GPUs
+        if all_gpu_ids:
+            self._kill_orphan_vllm_on_gpus(all_gpu_ids)
 
     def _cleanup_server(self, normalized: str):
         """Backward compat alias."""
