@@ -1,8 +1,10 @@
 datasets
 docker
+mini-swe-agent
 pandas
 pyyaml
 PyMuPDF
 requests
 tenacity
+litellm
 vllm
