@@ -209,7 +209,7 @@ class VLLMServerManager:
             port += 1
         return port
 
-    def _wait_for_server(self, url: str, process: subprocess.Popen = None, timeout: int = 300) -> bool:
+    def _wait_for_server(self, url: str, process: subprocess.Popen = None, timeout: int = 300, log_path: str = None) -> bool:
         """Wait for server to become healthy.
 
         If process is provided, checks whether it has exited (crash/error)
@@ -221,22 +221,29 @@ class VLLMServerManager:
             # Check if the server process died
             if process is not None and process.poll() is not None:
                 exit_code = process.returncode
-                # Read whatever output the process produced
                 output = ""
-                try:
-                    output = process.stdout.read() if process.stdout else ""
-                except Exception:
-                    pass
-                # Extract last meaningful lines for the error message
+                if log_path and os.path.exists(log_path):
+                    try:
+                        with open(log_path, "r") as f:
+                            lines = f.readlines()
+                        output = "".join(lines[-200:]) if lines else "(log file empty)"
+                    except Exception:
+                        output = "(failed to read log file)"
+                else:
+                    try:
+                        output = process.stdout.read() if process.stdout else ""
+                    except Exception:
+                        pass
                 lines = [l for l in output.strip().split("\n") if l.strip()] if output else []
-                tail = "\n".join(lines[-20:]) if lines else "(no output captured)"
+                tail = "\n".join(lines[-200:]) if lines else "(no output captured)"
+                log_hint = f"\n  Log file: {log_path}" if log_path else ""
                 logger.error(
                     f"vLLM server process exited with code {exit_code}. "
                     f"Last output:\n{tail}"
                 )
                 print(
                     f"\n  [vLLM ERROR] Server process died (exit code {exit_code}).\n"
-                    f"  Last output:\n{tail}\n"
+                    f"  Last output:\n{tail}{log_hint}\n"
                 )
                 return False
 
@@ -302,23 +309,31 @@ class VLLMServerManager:
         gpu_label = gpu_ids if gpu_ids else "all"
         logger.info(f"Starting vLLM for {model_name} on port {port}, tp={tp_size}, gpus={gpu_label}")
 
+        log_dir = os.environ.get("VLLM_LOG_DIR", "/tmp/vllm-logs")
+        os.makedirs(log_dir, exist_ok=True)
+        safe_model = re.sub(r"[^a-zA-Z0-9_.-]+", "_", model_name)
+        log_path = os.path.join(log_dir, f"vllm_{safe_model}_{port}_{int(time.time())}.log")
+
         try:
+            log_file = open(log_path, "w")
             process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
+                stdout=log_file,
                 stderr=subprocess.STDOUT,
                 text=True,
                 env=env,
             )
+            log_file.close()
             url = f"http://localhost:{port}"
 
-            if self._wait_for_server(url, process=process, timeout=600):
+            if self._wait_for_server(url, process=process, timeout=600, log_path=log_path):
                 info = {
                     "process": process,
                     "port": port,
                     "url": url,
                     "model": model_name,
                     "gpu_ids": gpu_ids or [],
+                    "log_path": log_path,
                 }
                 logger.info(f"vLLM server ready at {url} (gpus={gpu_label})")
                 return info
