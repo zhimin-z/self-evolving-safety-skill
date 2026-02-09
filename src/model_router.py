@@ -732,7 +732,13 @@ class ModelRouter:
 
         # Check if this is a local-deployable model
         if self.auto_deploy and _is_local_model(model_name):
-            return "vllm", self._normalize_model_name(model_name)
+            # Preserve original case for vLLM (it requires exact model name)
+            clean_name = model_name
+            for prefix in ["vllm/", "sglang/", "local/"]:
+                if clean_name.lower().startswith(prefix):
+                    clean_name = clean_name[len(prefix):]
+                    break
+            return "vllm", clean_name
 
         # Fall back to OpenRouter
         if not model_name.startswith("openrouter/"):
@@ -750,18 +756,19 @@ class ModelRouter:
         messages: List[Dict[str, Any]],
         **kwargs,
     ) -> Any:
-        """Make a completion request to vLLM server."""
-        response = requests.post(
-            f"{url}/v1/chat/completions",
-            json={
-                "model": model,
-                "messages": messages,
-                **kwargs,
-            },
-            timeout=300,  # Longer timeout for generation
+        """Make a completion request to vLLM server via litellm.
+
+        Uses litellm with api_base pointing to the local vLLM server.
+        This ensures the response object matches litellm format (.choices[0].message.content).
+        """
+        return litellm.completion(
+            model=f"openai/{model}",
+            messages=messages,
+            api_base=url,
+            api_key="unused",
+            timeout=300,
+            **kwargs,
         )
-        response.raise_for_status()
-        return response.json()
 
     def completion(
         self,
