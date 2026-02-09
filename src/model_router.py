@@ -212,7 +212,7 @@ class VLLMServerManager:
         return port
 
     def _wait_for_server(self, url: str, process: subprocess.Popen = None, timeout: int = 300) -> bool:
-        """Wait for server to become healthy.
+        """Wait for server to become healthy and verify inference works.
 
         If process is provided, checks whether it has exited (crash/error)
         and surfaces the error output immediately instead of waiting for
@@ -245,11 +245,47 @@ class VLLMServerManager:
             try:
                 resp = requests.get(f"{url}/v1/models", timeout=5)
                 if resp.status_code == 200:
-                    return True
+                    # Extract served model name for warmup
+                    try:
+                        models_data = resp.json().get("data", [])
+                        served_model = models_data[0]["id"] if models_data else None
+                    except Exception:
+                        served_model = None
+                    # Server responds to metadata — now verify inference works
+                    if self._warmup_inference(url, served_model):
+                        return True
+                    else:
+                        logger.warning(f"Server {url} responds but inference warmup failed")
+                        return False
             except requests.RequestException:
                 pass
             time.sleep(2)
         return False
+
+    def _warmup_inference(self, url: str, model_name: str = None) -> bool:
+        """Send a small test request to verify the server can do inference."""
+        try:
+            resp = requests.post(
+                f"{url}/v1/chat/completions",
+                json={
+                    "model": model_name or "default",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 16,
+                    "temperature": 0.0,
+                },
+                timeout=60,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content:
+                    logger.info(f"Warmup OK for {url}: {content[:50]!r}")
+                    return True
+            logger.warning(f"Warmup failed for {url}: status={resp.status_code}, body={resp.text[:200]}")
+            return False
+        except Exception as e:
+            logger.warning(f"Warmup failed for {url}: {type(e).__name__}: {e}")
+            return False
 
     def _check_gpu_change(self):
         """Check if CUDA_VISIBLE_DEVICES changed; if so, restart all servers."""
@@ -293,6 +329,7 @@ class VLLMServerManager:
             "--tensor-parallel-size", str(tp_size),
             "--host", "0.0.0.0",
             "--trust-remote-code",
+            "--max-model-len", "4096",
         ]
         if tp_size >= 2:
             cmd.append("--enable-chunked-prefill")
@@ -442,6 +479,7 @@ class VLLMServerManager:
                             "--tensor-parallel-size", "1",
                             "--host", "0.0.0.0",
                             "--trust-remote-code",
+                            "--max-model-len", "4096",
                         ]
                         env = os.environ.copy()
                         env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
@@ -480,10 +518,19 @@ class VLLMServerManager:
                                 logger.error(f"vLLM on GPU {gpu_id} died (exit {exit_code}): {tail}")
                                 print(f"  [vLLM] Instance on GPU {gpu_id} failed (exit {exit_code})")
                                 continue
-                            # Check if healthy
+                            # Check if healthy (metadata + inference warmup)
                             try:
                                 resp = requests.get(f"{url}/v1/models", timeout=3)
                                 if resp.status_code == 200:
+                                    # Also verify inference works
+                                    try:
+                                        served = resp.json().get("data", [{}])[0].get("id")
+                                    except Exception:
+                                        served = model_name
+                                    if not self._warmup_inference(url, served):
+                                        logger.warning(f"Instance on GPU {gpu_id} failed warmup, killing")
+                                        self._kill_process_group(process)
+                                        continue
                                     self._servers[normalized].append({
                                         "process": process,
                                         "port": port,
