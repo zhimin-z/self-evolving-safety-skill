@@ -21,7 +21,6 @@ from typing import Optional, Dict, Any, List, Set
 import requests
 import litellm
 litellm.suppress_debug_info = True
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
@@ -746,11 +745,6 @@ class ModelRouter:
             model_name = f"openrouter/{model_name}"
         return "openrouter", model_name
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        reraise=True,
-    )
     def _vllm_completion(
         self,
         url: str,
@@ -758,10 +752,13 @@ class ModelRouter:
         messages: List[Dict[str, Any]],
         **kwargs,
     ) -> Any:
-        """Make a completion request to vLLM server via litellm.
+        """Make a single completion request to vLLM server via litellm.
 
         Uses litellm with hosted_vllm/ prefix and api_base pointing to local vLLM.
         This ensures the response object matches litellm format (.choices[0].message.content).
+
+        No retry here — retry logic lives in completion() which picks a different
+        server on each attempt via round-robin.
         """
         litellm_model = f"hosted_vllm/{model}"
         api_base = f"{url}/v1"
@@ -771,7 +768,7 @@ class ModelRouter:
                 messages=messages,
                 api_base=api_base,
                 api_key="unused",
-                timeout=300,
+                timeout=600,
                 **kwargs,
             )
         except Exception as e:
@@ -804,14 +801,29 @@ class ModelRouter:
                 if original_model.lower().startswith(prefix):
                     original_model = original_model[len(prefix):]
 
-            # Ensure server pool is running, then pick next via round-robin
+            # Ensure server pool is running
             pool_ok = self._server_manager.ensure_server_pool(original_model)
 
             if pool_ok:
-                server_url = self._server_manager.get_next_server_url(original_model)
-                if server_url:
-                    logger.info(f"Routing '{model}' to vLLM at {server_url}")
-                    return self._vllm_completion(server_url, formatted_model, messages, **kwargs)
+                # Retry up to 3 times, picking a DIFFERENT server each attempt
+                last_error = None
+                for attempt in range(3):
+                    server_url = self._server_manager.get_next_server_url(original_model)
+                    if not server_url:
+                        break
+                    try:
+                        logger.info(f"Routing '{model}' to vLLM at {server_url} (attempt {attempt + 1}/3)")
+                        return self._vllm_completion(server_url, formatted_model, messages, **kwargs)
+                    except Exception as e:
+                        last_error = e
+                        logger.warning(f"vLLM attempt {attempt + 1}/3 failed on {server_url}: {type(e).__name__}")
+                        continue
+                # All attempts exhausted
+                if last_error:
+                    if _is_local_model(model):
+                        raise RuntimeError(
+                            f"All vLLM attempts failed for local model '{model}': {last_error}"
+                        ) from last_error
 
             # vLLM failed — only fall back to OpenRouter for models that exist there
             if _is_local_model(model):
