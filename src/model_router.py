@@ -749,6 +749,7 @@ class ModelRouter:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
+        reraise=True,
     )
     def _vllm_completion(
         self,
@@ -762,14 +763,20 @@ class ModelRouter:
         Uses litellm with hosted_vllm/ prefix and api_base pointing to local vLLM.
         This ensures the response object matches litellm format (.choices[0].message.content).
         """
-        return litellm.completion(
-            model=f"hosted_vllm/{model}",
-            messages=messages,
-            api_base=url,
-            api_key="unused",
-            timeout=300,
-            **kwargs,
-        )
+        litellm_model = f"hosted_vllm/{model}"
+        api_base = f"{url}/v1"
+        try:
+            return litellm.completion(
+                model=litellm_model,
+                messages=messages,
+                api_base=api_base,
+                api_key="unused",
+                timeout=300,
+                **kwargs,
+            )
+        except Exception as e:
+            logger.error(f"_vllm_completion failed: model={litellm_model}, url={api_base}, error={type(e).__name__}: {e}")
+            raise
 
     def completion(
         self,
