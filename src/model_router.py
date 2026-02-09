@@ -20,6 +20,7 @@ from typing import Optional, Dict, Any, List, Set
 
 import requests
 import litellm
+litellm.suppress_debug_info = True
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
