@@ -647,17 +647,24 @@ def build_trajectory(
     return trajectory
 
 
-def save_trajectories(trajectories: List[Dict], traj_file: str):
-    """Save all trajectories to a single JSON file.
+def save_trajectories(trajectories: List[Dict], traj_dir: str):
+    """Save each trajectory as an individual JSON file inside a folder.
+
+    The folder name should match the corresponding result JSON filename
+    (without the .json extension).
 
     Args:
         trajectories: List of trajectory dicts built by build_trajectory()
-        traj_file: Path to the output JSON file
+        traj_dir: Path to the trajectory folder (named after result file)
     """
-    os.makedirs(os.path.dirname(traj_file), exist_ok=True)
-    with open(traj_file, "w", encoding="utf-8") as f:
-        json.dump(trajectories, f, indent=2)
-    return traj_file
+    os.makedirs(traj_dir, exist_ok=True)
+    for traj in trajectories:
+        case_id = traj.get("case_id", "unknown")
+        filename = f"{case_id}.json"
+        filepath = os.path.join(traj_dir, filename)
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(traj, f, indent=2)
+    return traj_dir
 
 
 def run_prompt(
@@ -827,11 +834,11 @@ def eval_dataset(
 
     start_time = time.time()
 
-    # Trajectory file: same name as result file, in trajs/ directory
+    # Trajectory folder: same name as result file (sans .json), in trajs/ directory
     traj_base = result_base_dir.replace("/results", "/trajs")
     if traj_base == result_base_dir:
         traj_base = os.path.join(os.path.dirname(result_base_dir), "trajs")
-    traj_file = os.path.join(traj_base, os.path.basename(resfile))
+    traj_dir = os.path.join(traj_base, os.path.basename(resfile).replace(".json", ""))
 
     # Flatten all (item, input_type) pairs into work items
     work_items = []
@@ -918,10 +925,10 @@ def eval_dataset(
     with open(resfile, "w", encoding="utf-8") as f:
         json.dump(eval_log, f, indent=2)
 
-    # Save trajectories as a single file matching the result filename
+    # Save trajectories as folder matching the result filename (sans .json)
     if all_trajectories:
-        save_trajectories(all_trajectories, traj_file)
-        print(f"  Trajectories saved to: {traj_file}")
+        save_trajectories(all_trajectories, traj_dir)
+        print(f"  Trajectories saved to: {traj_dir}")
 
     print(f"\n  Results saved to: {resfile}")
 
@@ -1476,12 +1483,12 @@ def eval_gen_category(
 
     start_time = time.time()
 
-    # Trajectory file: same name as result file, in trajs/ directory
+    # Trajectory folder: same name as result file (sans .json), in trajs/ directory
     resfile_dir = os.path.dirname(resfile)
     traj_base = resfile_dir.replace("/results", "/trajs")
     if traj_base == resfile_dir:
         traj_base = os.path.join(os.path.dirname(resfile_dir), "trajs")
-    traj_file = os.path.join(traj_base, os.path.basename(resfile))
+    traj_dir = os.path.join(traj_base, os.path.basename(resfile).replace(".json", ""))
 
     # Build work items
     work_items = []
@@ -1551,10 +1558,10 @@ def eval_gen_category(
     with open(resfile, "w", encoding="utf-8") as f:
         json.dump(eval_log, f, indent=2)
 
-    # Save trajectories as a single file matching the result filename
+    # Save trajectories as folder matching the result filename (sans .json)
     if all_trajectories:
-        save_trajectories(all_trajectories, traj_file)
-        print(f"  Trajectories saved to: {traj_file}")
+        save_trajectories(all_trajectories, traj_dir)
+        print(f"  Trajectories saved to: {traj_dir}")
 
 
 # ============================================================================
@@ -2501,11 +2508,11 @@ def eval_exec_cases(
     with open(resfile, "w") as f:
         json.dump(eval_log, f, indent=2)
 
-    # Save trajectories as a single file matching the result filename
+    # Save trajectories as folder matching the result filename (sans .json)
     if all_trajectories:
-        traj_file = os.path.join(traj_base, result_filename)
-        save_trajectories(all_trajectories, traj_file)
-        print(f"  Trajectories saved to: {traj_file}")
+        traj_dir = os.path.join(traj_base, result_filename.replace(".json", ""))
+        save_trajectories(all_trajectories, traj_dir)
+        print(f"  Trajectories saved to: {traj_dir}")
 
     print(f"\n  Results saved to: {resfile}")
     return eval_log
@@ -2669,11 +2676,11 @@ def eval_gen_cases(
     with open(resfile, "w") as f:
         json.dump(eval_log, f, indent=2)
 
-    # Save trajectories as a single file matching the result filename
+    # Save trajectories as folder matching the result filename (sans .json)
     if all_trajectories:
-        traj_file = os.path.join(traj_base, result_filename)
-        save_trajectories(all_trajectories, traj_file)
-        print(f"  Trajectories saved to: {traj_file}")
+        traj_dir = os.path.join(traj_base, result_filename.replace(".json", ""))
+        save_trajectories(all_trajectories, traj_dir)
+        print(f"  Trajectories saved to: {traj_dir}")
 
     print(f"\n  Results saved to: {resfile}")
     return eval_log
