@@ -170,6 +170,8 @@ class VLLMServerManager:
         self._rr_counters: Dict[str, int] = {}  # model -> round-robin counter
         self._failed_models: Dict[str, float] = {}  # model -> timestamp of last failure
         self._failure_cooldown = failure_cooldown  # seconds before retrying a failed model
+        self._unhealthy_urls: Dict[str, float] = {}  # url -> timestamp of failure
+        self._unhealthy_ttl = 120  # seconds before retrying an unhealthy server
         self._gpu_count = _get_gpu_count()
         self._gpu_ids = _get_gpu_ids()
         self._gpu_env_snapshot = _get_cuda_visible_devices()  # track GPU set at launch
@@ -536,19 +538,36 @@ class VLLMServerManager:
             return self.get_next_server_url(model_name)
         return None
 
-    def get_next_server_url(self, model_name: str) -> Optional[str]:
-        """Return the next server URL via round-robin.
+    def mark_unhealthy(self, url: str):
+        """Mark a server URL as temporarily unhealthy (skipped for _unhealthy_ttl seconds)."""
+        self._unhealthy_urls[url] = time.time()
+        logger.warning(f"Marked {url} as unhealthy (will skip for {self._unhealthy_ttl}s)")
 
+    def get_next_server_url(self, model_name: str) -> Optional[str]:
+        """Return the next healthy server URL via round-robin.
+
+        Skips servers marked unhealthy within the last _unhealthy_ttl seconds.
         Thread-safe: uses CPython GIL for the counter increment.
-        No per-request health check — let _vllm_completion retry handle failures.
         """
         normalized = self._normalize_model(model_name)
         instances = self._servers.get(normalized, [])
         if not instances:
             return None
         n = len(instances)
-        if n == 1:
-            return instances[0]["url"]
+        now = time.time()
+        # Try up to n times to find a healthy server
+        for _ in range(n):
+            idx = self._rr_counters.get(normalized, 0)
+            self._rr_counters[normalized] = (idx + 1) % n
+            url = instances[idx % n]["url"]
+            failed_at = self._unhealthy_urls.get(url)
+            if failed_at and (now - failed_at) < self._unhealthy_ttl:
+                continue  # skip this server, try next
+            # Clear expired entry if any
+            self._unhealthy_urls.pop(url, None)
+            return url
+        # All servers unhealthy — return next one anyway (let caller handle)
+        logger.warning("All vLLM servers marked unhealthy, returning next available")
         idx = self._rr_counters.get(normalized, 0)
         self._rr_counters[normalized] = (idx + 1) % n
         return instances[idx % n]["url"]
@@ -768,7 +787,7 @@ class ModelRouter:
                 messages=messages,
                 api_base=api_base,
                 api_key="unused",
-                timeout=600,
+                timeout=120,
                 **kwargs,
             )
         except Exception as e:
@@ -816,6 +835,7 @@ class ModelRouter:
                         return self._vllm_completion(server_url, formatted_model, messages, **kwargs)
                     except Exception as e:
                         last_error = e
+                        self._server_manager.mark_unhealthy(server_url)
                         logger.warning(f"vLLM attempt {attempt + 1}/3 failed on {server_url}: {type(e).__name__}")
                         continue
                 # All attempts exhausted
