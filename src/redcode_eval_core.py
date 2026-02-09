@@ -59,6 +59,17 @@ def completion_with_retry(max_retries: int = MAX_RETRIES, **kwargs):
             time.sleep(delay)
 
 
+def _get_completion_content(response: Any) -> str:
+    """Extract assistant message content from either object or dict responses."""
+    try:
+        return _get_completion_content(response)
+    except Exception:
+        try:
+            return response["choices"][0]["message"]["content"]
+        except Exception:
+            return ""
+
+
 # Load environment variables
 dotenv.load_dotenv(override=True)
 
@@ -409,7 +420,7 @@ class SWEAgentWrapper(BaseAgent):
                     temperature=self._model_config["temperature"],
                     max_tokens=self._model_config["max_tokens"],
                 )
-                assistant_msg = response.choices[0].message.content
+                assistant_msg = _get_completion_content(response)
                 self._messages.append({"role": "assistant", "content": assistant_msg})
 
                 # Extract and execute bash command
@@ -1922,7 +1933,7 @@ Generate the initial skill now:"""
             temperature=0.3,
             max_tokens=8192
         )
-        return extract_markdown(response.choices[0].message.content)
+        return extract_markdown(_get_completion_content(response))
     except Exception as e:
         print(f"  Error generating initial skill: {e}")
         return None
@@ -1992,7 +2003,7 @@ Generate the initial skill now:"""
             temperature=0.3,
             max_tokens=8192
         )
-        return extract_markdown(response.choices[0].message.content)
+        return extract_markdown(_get_completion_content(response))
     except Exception as e:
         print(f"  Error generating initial skill: {e}")
         return None
@@ -2058,7 +2069,7 @@ Generate the complete security skill now:"""
             temperature=0.3,
             max_tokens=8192
         )
-        return extract_markdown(response.choices[0].message.content)
+        return extract_markdown(_get_completion_content(response))
     except Exception as e:
         print(f"  Error generating initial skill: {e}")
         return None
@@ -2139,7 +2150,7 @@ Return ONLY the updated skill content:"""
             temperature=0.3,
             max_tokens=8192
         )
-        return extract_markdown(response.choices[0].message.content)
+        return extract_markdown(_get_completion_content(response))
     except Exception as e:
         print(f"  Error refining skill: {e}")
         return None
@@ -2479,7 +2490,6 @@ def eval_exec_cases(
             "Summary": dict(Counter(res_prompt_type["text_summary"])),
             "Details": dict(Counter(res_prompt_type["text_details"])),
         },
-        "Results": all_results,
     }
 
     result_filename = generate_result_filename(
@@ -2488,10 +2498,8 @@ def eval_exec_cases(
     )
     resfile = os.path.join(result_base, result_filename)
 
-    # Write summary to file (exclude bulky per-case Results)
-    eval_log_file = {k: v for k, v in eval_log.items() if k != "Results"}
     with open(resfile, "w") as f:
-        json.dump(eval_log_file, f, indent=2)
+        json.dump(eval_log, f, indent=2)
 
     # Save trajectories as a single file matching the result filename
     if all_trajectories:
@@ -2650,7 +2658,6 @@ def eval_gen_cases(
         "Score Distribution": {
             "Code Generation": score_dist,
         },
-        "Results": all_results,
     }
 
     result_filename = generate_result_filename(
@@ -2659,10 +2666,8 @@ def eval_gen_cases(
     )
     resfile = os.path.join(result_base, result_filename)
 
-    # Write summary to file (exclude bulky per-case Results)
-    eval_log_file = {k: v for k, v in eval_log.items() if k != "Results"}
     with open(resfile, "w") as f:
-        json.dump(eval_log_file, f, indent=2)
+        json.dump(eval_log, f, indent=2)
 
     # Save trajectories as a single file matching the result filename
     if all_trajectories:

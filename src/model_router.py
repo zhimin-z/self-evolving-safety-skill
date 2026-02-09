@@ -20,7 +20,7 @@ from typing import Optional, Dict, Any, List, Set
 
 import requests
 import litellm
-litellm.suppress_debug_info = True
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
@@ -170,8 +170,6 @@ class VLLMServerManager:
         self._rr_counters: Dict[str, int] = {}  # model -> round-robin counter
         self._failed_models: Dict[str, float] = {}  # model -> timestamp of last failure
         self._failure_cooldown = failure_cooldown  # seconds before retrying a failed model
-        self._unhealthy_urls: Dict[str, float] = {}  # url -> timestamp of failure
-        self._unhealthy_ttl = 1800  # 30 min — if a server fails, it's likely dead for the run
         self._gpu_count = _get_gpu_count()
         self._gpu_ids = _get_gpu_ids()
         self._gpu_env_snapshot = _get_cuda_visible_devices()  # track GPU set at launch
@@ -211,8 +209,8 @@ class VLLMServerManager:
             port += 1
         return port
 
-    def _wait_for_server(self, url: str, process: subprocess.Popen = None, timeout: int = 300) -> bool:
-        """Wait for server to become healthy and verify inference works.
+    def _wait_for_server(self, url: str, process: subprocess.Popen = None, timeout: int = 300, log_path: str = None) -> bool:
+        """Wait for server to become healthy.
 
         If process is provided, checks whether it has exited (crash/error)
         and surfaces the error output immediately instead of waiting for
@@ -223,69 +221,40 @@ class VLLMServerManager:
             # Check if the server process died
             if process is not None and process.poll() is not None:
                 exit_code = process.returncode
-                # Read whatever output the process produced
                 output = ""
-                try:
-                    output = process.stdout.read() if process.stdout else ""
-                except Exception:
-                    pass
-                # Extract last meaningful lines for the error message
+                if log_path and os.path.exists(log_path):
+                    try:
+                        with open(log_path, "r") as f:
+                            lines = f.readlines()
+                        output = "".join(lines[-200:]) if lines else "(log file empty)"
+                    except Exception:
+                        output = "(failed to read log file)"
+                else:
+                    try:
+                        output = process.stdout.read() if process.stdout else ""
+                    except Exception:
+                        pass
                 lines = [l for l in output.strip().split("\n") if l.strip()] if output else []
-                tail = "\n".join(lines[-20:]) if lines else "(no output captured)"
+                tail = "\n".join(lines[-200:]) if lines else "(no output captured)"
+                log_hint = f"\n  Log file: {log_path}" if log_path else ""
                 logger.error(
                     f"vLLM server process exited with code {exit_code}. "
                     f"Last output:\n{tail}"
                 )
                 print(
                     f"\n  [vLLM ERROR] Server process died (exit code {exit_code}).\n"
-                    f"  Last output:\n{tail}\n"
+                    f"  Last output:\n{tail}{log_hint}\n"
                 )
                 return False
 
             try:
                 resp = requests.get(f"{url}/v1/models", timeout=5)
                 if resp.status_code == 200:
-                    # Extract served model name for warmup
-                    try:
-                        models_data = resp.json().get("data", [])
-                        served_model = models_data[0]["id"] if models_data else None
-                    except Exception:
-                        served_model = None
-                    # Server responds to metadata — now verify inference works
-                    if self._warmup_inference(url, served_model):
-                        return True
-                    else:
-                        logger.warning(f"Server {url} responds but inference warmup failed")
-                        return False
+                    return True
             except requests.RequestException:
                 pass
             time.sleep(2)
         return False
-
-    def _warmup_inference(self, url: str, model_name: str = None) -> bool:
-        """Send a small test request to verify the server can do inference."""
-        try:
-            resp = requests.post(
-                f"{url}/v1/chat/completions",
-                json={
-                    "model": model_name or "default",
-                    "messages": [{"role": "user", "content": "Hi"}],
-                    "max_tokens": 16,
-                    "temperature": 0.0,
-                },
-                timeout=60,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                if content:
-                    logger.info(f"Warmup OK for {url}: {content[:50]!r}")
-                    return True
-            logger.warning(f"Warmup failed for {url}: status={resp.status_code}, body={resp.text[:200]}")
-            return False
-        except Exception as e:
-            logger.warning(f"Warmup failed for {url}: {type(e).__name__}: {e}")
-            return False
 
     def _check_gpu_change(self):
         """Check if CUDA_VISIBLE_DEVICES changed; if so, restart all servers."""
@@ -329,7 +298,6 @@ class VLLMServerManager:
             "--tensor-parallel-size", str(tp_size),
             "--host", "0.0.0.0",
             "--trust-remote-code",
-            "--max-model-len", "4096",
         ]
         if tp_size >= 2:
             cmd.append("--enable-chunked-prefill")
@@ -341,31 +309,38 @@ class VLLMServerManager:
         gpu_label = gpu_ids if gpu_ids else "all"
         logger.info(f"Starting vLLM for {model_name} on port {port}, tp={tp_size}, gpus={gpu_label}")
 
+        log_dir = os.environ.get("VLLM_LOG_DIR", "/tmp/vllm-logs")
+        os.makedirs(log_dir, exist_ok=True)
+        safe_model = re.sub(r"[^a-zA-Z0-9_.-]+", "_", model_name)
+        log_path = os.path.join(log_dir, f"vllm_{safe_model}_{port}_{int(time.time())}.log")
+
         try:
+            log_file = open(log_path, "w")
             process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
+                stdout=log_file,
                 stderr=subprocess.STDOUT,
                 text=True,
                 env=env,
-                start_new_session=True,
             )
+            log_file.close()
             url = f"http://localhost:{port}"
 
-            if self._wait_for_server(url, process=process, timeout=600):
+            if self._wait_for_server(url, process=process, timeout=600, log_path=log_path):
                 info = {
                     "process": process,
                     "port": port,
                     "url": url,
                     "model": model_name,
                     "gpu_ids": gpu_ids or [],
+                    "log_path": log_path,
                 }
                 logger.info(f"vLLM server ready at {url} (gpus={gpu_label})")
                 return info
             else:
                 if process.poll() is None:
                     logger.error(f"vLLM server on port {port} failed to start within timeout")
-                    self._kill_process_group(process)
+                    process.terminate()
                 return None
         except Exception as e:
             logger.error(f"Failed to start vLLM server: {e}")
@@ -422,10 +397,6 @@ class VLLMServerManager:
             tp_size = _estimate_tp_size(model_name, self._gpu_count)
             gpu_ids = self._gpu_ids
 
-            # Pre-cleanup: kill any orphaned vLLM processes on target GPUs
-            # (e.g. EngineCore children from a previous crashed server)
-            self._kill_orphan_vllm_on_gpus(gpu_ids)
-
             self._servers[normalized] = []
             self._rr_counters[normalized] = 0
 
@@ -479,7 +450,6 @@ class VLLMServerManager:
                             "--tensor-parallel-size", "1",
                             "--host", "0.0.0.0",
                             "--trust-remote-code",
-                            "--max-model-len", "4096",
                         ]
                         env = os.environ.copy()
                         env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
@@ -490,7 +460,6 @@ class VLLMServerManager:
                                 stderr=subprocess.STDOUT,
                                 text=True,
                                 env=env,
-                                start_new_session=True,
                             )
                             pending.append((gpu_id, port, process))
                             logger.info(f"Launched vLLM on GPU {gpu_id}, port {port}")
@@ -518,19 +487,10 @@ class VLLMServerManager:
                                 logger.error(f"vLLM on GPU {gpu_id} died (exit {exit_code}): {tail}")
                                 print(f"  [vLLM] Instance on GPU {gpu_id} failed (exit {exit_code})")
                                 continue
-                            # Check if healthy (metadata + inference warmup)
+                            # Check if healthy
                             try:
                                 resp = requests.get(f"{url}/v1/models", timeout=3)
                                 if resp.status_code == 200:
-                                    # Also verify inference works
-                                    try:
-                                        served = resp.json().get("data", [{}])[0].get("id")
-                                    except Exception:
-                                        served = model_name
-                                    if not self._warmup_inference(url, served):
-                                        logger.warning(f"Instance on GPU {gpu_id} failed warmup, killing")
-                                        self._kill_process_group(process)
-                                        continue
                                     self._servers[normalized].append({
                                         "process": process,
                                         "port": port,
@@ -552,7 +512,7 @@ class VLLMServerManager:
                     # Kill any still-pending after timeout
                     for gpu_id, port, process in still_pending:
                         logger.error(f"vLLM on GPU {gpu_id} timed out, terminating")
-                        self._kill_process_group(process)
+                        process.terminate()
 
                 if not self._servers[normalized]:
                     logger.error(f"All vLLM instances failed for {model_name}")
@@ -585,128 +545,37 @@ class VLLMServerManager:
             return self.get_next_server_url(model_name)
         return None
 
-    def mark_unhealthy(self, url: str):
-        """Mark a server URL as temporarily unhealthy (skipped for _unhealthy_ttl seconds)."""
-        self._unhealthy_urls[url] = time.time()
-        logger.warning(f"Marked {url} as unhealthy (will skip for {self._unhealthy_ttl}s)")
-
     def get_next_server_url(self, model_name: str) -> Optional[str]:
-        """Return the next healthy server URL via round-robin.
+        """Return the next server URL via round-robin.
 
-        Skips servers marked unhealthy within the last _unhealthy_ttl seconds.
         Thread-safe: uses CPython GIL for the counter increment.
+        No per-request health check — let _vllm_completion retry handle failures.
         """
         normalized = self._normalize_model(model_name)
         instances = self._servers.get(normalized, [])
         if not instances:
             return None
         n = len(instances)
-        now = time.time()
-        # Try up to n times to find a healthy server
-        for _ in range(n):
-            idx = self._rr_counters.get(normalized, 0)
-            self._rr_counters[normalized] = (idx + 1) % n
-            url = instances[idx % n]["url"]
-            failed_at = self._unhealthy_urls.get(url)
-            if failed_at and (now - failed_at) < self._unhealthy_ttl:
-                continue  # skip this server, try next
-            # Clear expired entry if any
-            self._unhealthy_urls.pop(url, None)
-            return url
-        # All servers unhealthy — return next one anyway (let caller handle)
-        logger.warning("All vLLM servers marked unhealthy, returning next available")
+        if n == 1:
+            return instances[0]["url"]
         idx = self._rr_counters.get(normalized, 0)
         self._rr_counters[normalized] = (idx + 1) % n
         return instances[idx % n]["url"]
 
-    @staticmethod
-    def _kill_process_group(process: subprocess.Popen):
-        """Kill an entire process group (catches child EngineCore processes)."""
-        try:
-            pgid = os.getpgid(process.pid)
-            os.killpg(pgid, signal.SIGTERM)
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(pgid, signal.SIGKILL)
-                process.wait(timeout=5)
-        except (ProcessLookupError, OSError):
-            # Process/group already dead
-            try:
-                process.kill()
-            except Exception:
-                pass
-
-    @staticmethod
-    def _kill_orphan_vllm_on_gpus(gpu_ids: List[int]):
-        """Kill any orphaned vLLM EngineCore processes on the given GPUs.
-
-        After a vLLM API server crashes, its child EngineCore processes can
-        become orphaned and continue holding GPU memory.  This scans for and
-        kills them so the GPUs are actually free for a restart.
-        """
-        try:
-            result = subprocess.run(
-                ["nvidia-smi", "--query-compute-apps=pid,gpu_bus_id",
-                 "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if result.returncode != 0:
-                return
-
-            # Map GPU index → bus_id
-            bus_result = subprocess.run(
-                ["nvidia-smi", "--query-gpu=index,gpu_bus_id",
-                 "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if bus_result.returncode != 0:
-                return
-
-            target_buses = set()
-            for line in bus_result.stdout.strip().split("\n"):
-                parts = [p.strip() for p in line.split(",")]
-                if len(parts) == 2:
-                    idx = int(parts[0])
-                    if idx in gpu_ids:
-                        target_buses.add(parts[1])
-
-            killed = 0
-            for line in result.stdout.strip().split("\n"):
-                parts = [p.strip() for p in line.split(",")]
-                if len(parts) == 2:
-                    pid_str, bus_id = parts
-                    if bus_id in target_buses:
-                        try:
-                            pid = int(pid_str)
-                            # Verify it's actually a vLLM process before killing
-                            cmd_result = subprocess.run(
-                                ["ps", "-p", str(pid), "-o", "comm="],
-                                capture_output=True, text=True, timeout=5,
-                            )
-                            if "vllm" in cmd_result.stdout.lower() or "python" in cmd_result.stdout.lower():
-                                os.kill(pid, signal.SIGKILL)
-                                killed += 1
-                        except (ProcessLookupError, ValueError, OSError):
-                            pass
-            if killed:
-                logger.info(f"Killed {killed} orphaned vLLM process(es) on GPUs {gpu_ids}")
-                time.sleep(3)  # Give GPU memory time to be freed
-        except Exception as e:
-            logger.warning(f"Orphan cleanup failed (non-fatal): {e}")
-
     def _cleanup_model_servers(self, normalized: str):
-        """Clean up ALL server instances for a model, including child processes."""
+        """Clean up ALL server instances for a model."""
         instances = self._servers.pop(normalized, [])
         self._rr_counters.pop(normalized, None)
-        all_gpu_ids = []
         for instance in instances:
-            self._kill_process_group(instance["process"])
-            all_gpu_ids.extend(instance.get("gpu_ids", []))
+            try:
+                instance["process"].terminate()
+                instance["process"].wait(timeout=10)
+            except Exception:
+                try:
+                    instance["process"].kill()
+                except Exception:
+                    pass
             logger.info(f"Shut down server for {instance['model']} on port {instance['port']}")
-        # Also kill any orphaned EngineCore processes on those GPUs
-        if all_gpu_ids:
-            self._kill_orphan_vllm_on_gpus(all_gpu_ids)
 
     def _cleanup_server(self, normalized: str):
         """Backward compat alias."""
@@ -798,19 +667,17 @@ class ModelRouter:
 
         # Check if this is a local-deployable model
         if self.auto_deploy and _is_local_model(model_name):
-            # Preserve original case for vLLM (it requires exact model name)
-            clean_name = model_name
-            for prefix in ["vllm/", "sglang/", "local/"]:
-                if clean_name.lower().startswith(prefix):
-                    clean_name = clean_name[len(prefix):]
-                    break
-            return "vllm", clean_name
+            return "vllm", self._normalize_model_name(model_name)
 
         # Fall back to OpenRouter
         if not model_name.startswith("openrouter/"):
             model_name = f"openrouter/{model_name}"
         return "openrouter", model_name
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+    )
     def _vllm_completion(
         self,
         url: str,
@@ -818,28 +685,18 @@ class ModelRouter:
         messages: List[Dict[str, Any]],
         **kwargs,
     ) -> Any:
-        """Make a single completion request to vLLM server via litellm.
-
-        Uses litellm with hosted_vllm/ prefix and api_base pointing to local vLLM.
-        This ensures the response object matches litellm format (.choices[0].message.content).
-
-        No retry here — retry logic lives in completion() which picks a different
-        server on each attempt via round-robin.
-        """
-        litellm_model = f"hosted_vllm/{model}"
-        api_base = f"{url}/v1"
-        try:
-            return litellm.completion(
-                model=litellm_model,
-                messages=messages,
-                api_base=api_base,
-                api_key="unused",
-                timeout=120,
+        """Make a completion request to vLLM server."""
+        response = requests.post(
+            f"{url}/v1/chat/completions",
+            json={
+                "model": model,
+                "messages": messages,
                 **kwargs,
-            )
-        except Exception as e:
-            logger.error(f"_vllm_completion failed: model={litellm_model}, url={api_base}, error={type(e).__name__}: {e}")
-            raise
+            },
+            timeout=300,  # Longer timeout for generation
+        )
+        response.raise_for_status()
+        return response.json()
 
     def completion(
         self,
@@ -867,39 +724,21 @@ class ModelRouter:
                 if original_model.lower().startswith(prefix):
                     original_model = original_model[len(prefix):]
 
-            # Ensure server pool is running
+            # Ensure server pool is running, then pick next via round-robin
             pool_ok = self._server_manager.ensure_server_pool(original_model)
 
             if pool_ok:
-                # Retry up to 3 times, picking a DIFFERENT server each attempt
-                last_error = None
-                for attempt in range(3):
-                    server_url = self._server_manager.get_next_server_url(original_model)
-                    if not server_url:
-                        break
+                server_url = self._server_manager.get_next_server_url(original_model)
+                if server_url:
+                    logger.info(f"Routing '{model}' to vLLM at {server_url}")
                     try:
-                        logger.info(f"Routing '{model}' to vLLM at {server_url} (attempt {attempt + 1}/3)")
                         return self._vllm_completion(server_url, formatted_model, messages, **kwargs)
                     except Exception as e:
-                        last_error = e
-                        self._server_manager.mark_unhealthy(server_url)
-                        logger.warning(f"vLLM attempt {attempt + 1}/3 failed on {server_url}: {type(e).__name__}")
-                        continue
-                # All attempts exhausted
-                if last_error:
-                    if _is_local_model(model):
-                        raise RuntimeError(
-                            f"All vLLM attempts failed for local model '{model}': {last_error}"
-                        ) from last_error
+                        logger.warning(f"vLLM request failed: {e}")
+            else:
+                logger.warning(f"Failed to start vLLM server pool for {model}")
 
-            # vLLM failed — only fall back to OpenRouter for models that exist there
-            if _is_local_model(model):
-                raise RuntimeError(
-                    f"vLLM server pool not available for local model '{model}'. "
-                    f"Cannot fall back to OpenRouter for local-only models."
-                )
-
-            logger.warning(f"vLLM unavailable for {model}, falling back to OpenRouter")
+            # Update target for fallback
             target = "openrouter"
             if not model.startswith("openrouter/"):
                 formatted_model = f"openrouter/{model}"
