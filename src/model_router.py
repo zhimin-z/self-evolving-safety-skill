@@ -758,11 +758,11 @@ class ModelRouter:
     ) -> Any:
         """Make a completion request to vLLM server via litellm.
 
-        Uses litellm with api_base pointing to the local vLLM server.
+        Uses litellm with hosted_vllm/ prefix and api_base pointing to local vLLM.
         This ensures the response object matches litellm format (.choices[0].message.content).
         """
         return litellm.completion(
-            model=f"openai/{model}",
+            model=f"hosted_vllm/{model}",
             messages=messages,
             api_base=url,
             api_key="unused",
