@@ -171,7 +171,7 @@ class VLLMServerManager:
         self._failed_models: Dict[str, float] = {}  # model -> timestamp of last failure
         self._failure_cooldown = failure_cooldown  # seconds before retrying a failed model
         self._unhealthy_urls: Dict[str, float] = {}  # url -> timestamp of failure
-        self._unhealthy_ttl = 120  # seconds before retrying an unhealthy server
+        self._unhealthy_ttl = 1800  # 30 min — if a server fails, it's likely dead for the run
         self._gpu_count = _get_gpu_count()
         self._gpu_ids = _get_gpu_ids()
         self._gpu_env_snapshot = _get_cuda_visible_devices()  # track GPU set at launch
