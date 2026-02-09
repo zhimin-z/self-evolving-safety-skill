@@ -20,7 +20,7 @@ from typing import Optional, Dict, Any, List, Set
 
 import requests
 import litellm
-from tenacity import retry, stop_after_attempt, wait_exponential
+litellm.suppress_debug_info = True
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,8 @@ class VLLMServerManager:
         self._gpu_count = _get_gpu_count()
         self._gpu_ids = _get_gpu_ids()
         self._gpu_env_snapshot = _get_cuda_visible_devices()  # track GPU set at launch
+        self._unhealthy_urls: Dict[str, float] = {}  # url -> timestamp of failure
+        self._unhealthy_ttl = 1800  # 30 min — if a server fails, it's likely dead for the run
 
         # Register cleanup on exit
         atexit.register(self.shutdown_all)
@@ -250,11 +252,46 @@ class VLLMServerManager:
             try:
                 resp = requests.get(f"{url}/v1/models", timeout=5)
                 if resp.status_code == 200:
-                    return True
+                    # Metadata endpoint is up; now verify actual inference works
+                    try:
+                        models_data = resp.json().get("data", [])
+                        served_model = models_data[0]["id"] if models_data else None
+                    except Exception:
+                        served_model = None
+                    if self._warmup_inference(url, served_model):
+                        return True
+                    else:
+                        logger.warning(f"Server {url} responds to /v1/models but inference warmup failed")
+                        return False
             except requests.RequestException:
                 pass
             time.sleep(2)
         return False
+
+    def _warmup_inference(self, url: str, model_name: str = None) -> bool:
+        """Send a small test request to verify the server can do inference."""
+        try:
+            resp = requests.post(
+                f"{url}/v1/chat/completions",
+                json={
+                    "model": model_name or "default",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 16,
+                    "temperature": 0.0,
+                },
+                timeout=60,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content:
+                    logger.info(f"Warmup OK for {url}: {content[:50]!r}")
+                    return True
+            logger.warning(f"Warmup failed for {url}: status={resp.status_code}, body={resp.text[:200]}")
+            return False
+        except Exception as e:
+            logger.warning(f"Warmup failed for {url}: {type(e).__name__}: {e}")
+            return False
 
     def _check_gpu_change(self):
         """Check if CUDA_VISIBLE_DEVICES changed; if so, restart all servers."""
@@ -298,6 +335,7 @@ class VLLMServerManager:
             "--tensor-parallel-size", str(tp_size),
             "--host", "0.0.0.0",
             "--trust-remote-code",
+            "--max-model-len", "4096",
         ]
         if tp_size >= 2:
             cmd.append("--enable-chunked-prefill")
@@ -450,6 +488,7 @@ class VLLMServerManager:
                             "--tensor-parallel-size", "1",
                             "--host", "0.0.0.0",
                             "--trust-remote-code",
+                            "--max-model-len", "4096",
                         ]
                         env = os.environ.copy()
                         env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
@@ -487,10 +526,18 @@ class VLLMServerManager:
                                 logger.error(f"vLLM on GPU {gpu_id} died (exit {exit_code}): {tail}")
                                 print(f"  [vLLM] Instance on GPU {gpu_id} failed (exit {exit_code})")
                                 continue
-                            # Check if healthy
+                            # Check if healthy (metadata + inference warmup)
                             try:
                                 resp = requests.get(f"{url}/v1/models", timeout=3)
                                 if resp.status_code == 200:
+                                    try:
+                                        served = resp.json().get("data", [{}])[0].get("id")
+                                    except Exception:
+                                        served = model_name
+                                    if not self._warmup_inference(url, served):
+                                        logger.warning(f"Instance on GPU {gpu_id} failed warmup, killing")
+                                        process.terminate()
+                                        continue
                                     self._servers[normalized].append({
                                         "process": process,
                                         "port": port,
@@ -545,19 +592,39 @@ class VLLMServerManager:
             return self.get_next_server_url(model_name)
         return None
 
-    def get_next_server_url(self, model_name: str) -> Optional[str]:
-        """Return the next server URL via round-robin.
+    def mark_unhealthy(self, url: str):
+        """Mark a server URL as temporarily unhealthy (skipped for _unhealthy_ttl seconds)."""
+        self._unhealthy_urls[url] = time.time()
+        logger.warning(f"Marked {url} as unhealthy (will skip for {self._unhealthy_ttl}s)")
 
-        Thread-safe: uses CPython GIL for the counter increment.
-        No per-request health check — let _vllm_completion retry handle failures.
+    def get_next_server_url(self, model_name: str) -> Optional[str]:
+        """Return the next healthy server URL via round-robin.
+
+        Skips servers marked unhealthy within the TTL window.
+        If all servers are unhealthy, returns the next one anyway (last resort).
         """
         normalized = self._normalize_model(model_name)
         instances = self._servers.get(normalized, [])
         if not instances:
             return None
         n = len(instances)
-        if n == 1:
-            return instances[0]["url"]
+        now = time.time()
+
+        # Try to find a healthy server
+        for _ in range(n):
+            idx = self._rr_counters.get(normalized, 0)
+            self._rr_counters[normalized] = (idx + 1) % n
+            url = instances[idx % n]["url"]
+
+            failed_at = self._unhealthy_urls.get(url)
+            if failed_at and (now - failed_at) < self._unhealthy_ttl:
+                continue  # skip unhealthy
+            # Healthy or TTL expired
+            self._unhealthy_urls.pop(url, None)
+            return url
+
+        # All servers unhealthy — return next one anyway as last resort
+        logger.warning("All vLLM servers marked unhealthy, returning next available")
         idx = self._rr_counters.get(normalized, 0)
         self._rr_counters[normalized] = (idx + 1) % n
         return instances[idx % n]["url"]
@@ -674,10 +741,6 @@ class ModelRouter:
             model_name = f"openrouter/{model_name}"
         return "openrouter", model_name
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-    )
     def _vllm_completion(
         self,
         url: str,
@@ -685,18 +748,25 @@ class ModelRouter:
         messages: List[Dict[str, Any]],
         **kwargs,
     ) -> Any:
-        """Make a completion request to vLLM server."""
-        response = requests.post(
-            f"{url}/v1/chat/completions",
-            json={
-                "model": model,
-                "messages": messages,
+        """Make a single completion request to vLLM server via litellm.
+
+        No retry here — retry logic lives in completion() which picks a different
+        server on each attempt via round-robin.
+        """
+        litellm_model = f"hosted_vllm/{model}"
+        api_base = f"{url}/v1"
+        try:
+            return litellm.completion(
+                model=litellm_model,
+                messages=messages,
+                api_base=api_base,
+                api_key="unused",
+                timeout=120,
                 **kwargs,
-            },
-            timeout=300,  # Longer timeout for generation
-        )
-        response.raise_for_status()
-        return response.json()
+            )
+        except Exception as e:
+            logger.error(f"_vllm_completion failed: model={litellm_model}, url={api_base}, error={type(e).__name__}: {e}")
+            raise
 
     def completion(
         self,
@@ -707,13 +777,9 @@ class ModelRouter:
         """
         Route completion request to appropriate backend.
 
-        Args:
-            model: Model name
-            messages: Chat messages
-            **kwargs: Additional parameters (temperature, max_tokens, etc.)
-
-        Returns:
-            Completion response (OpenAI-compatible format)
+        For vLLM targets: retries up to 3 times, picking a DIFFERENT server
+        each attempt via round-robin. Marks failed servers as unhealthy.
+        For local models: never silently falls back to OpenRouter.
         """
         target, formatted_model = self.get_routing_target(model)
 
@@ -724,21 +790,39 @@ class ModelRouter:
                 if original_model.lower().startswith(prefix):
                     original_model = original_model[len(prefix):]
 
-            # Ensure server pool is running, then pick next via round-robin
+            # Ensure server pool is running
             pool_ok = self._server_manager.ensure_server_pool(original_model)
 
             if pool_ok:
-                server_url = self._server_manager.get_next_server_url(original_model)
-                if server_url:
-                    logger.info(f"Routing '{model}' to vLLM at {server_url}")
+                # Retry up to 3 times, picking a DIFFERENT server each attempt
+                last_error = None
+                for attempt in range(3):
+                    server_url = self._server_manager.get_next_server_url(original_model)
+                    if not server_url:
+                        break
                     try:
+                        logger.info(f"Routing '{model}' to vLLM at {server_url} (attempt {attempt + 1}/3)")
                         return self._vllm_completion(server_url, formatted_model, messages, **kwargs)
                     except Exception as e:
-                        logger.warning(f"vLLM request failed: {e}")
+                        last_error = e
+                        self._server_manager.mark_unhealthy(server_url)
+                        logger.warning(f"vLLM attempt {attempt + 1}/3 failed on {server_url}: {type(e).__name__}")
+                        continue
+
+                # All attempts exhausted — raise for local models (no silent fallback)
+                if last_error:
+                    if _is_local_model(model):
+                        raise RuntimeError(
+                            f"All vLLM attempts failed for local model '{model}': {last_error}"
+                        ) from last_error
             else:
+                if _is_local_model(model):
+                    raise RuntimeError(
+                        f"Failed to start vLLM server pool for local model '{model}'"
+                    )
                 logger.warning(f"Failed to start vLLM server pool for {model}")
 
-            # Update target for fallback
+            # Only reach here for non-local models that failed vLLM
             target = "openrouter"
             if not model.startswith("openrouter/"):
                 formatted_model = f"openrouter/{model}"
