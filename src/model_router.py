@@ -203,7 +203,11 @@ class VLLMServerManager:
     """
 
     def __init__(self, base_port: int = 30000, failure_cooldown: int = 300):
-        base_port = int(os.getenv("VLLM_BASE_PORT", str(base_port)))
+        env_base = os.environ.get("VLLM_BASE_PORT")
+        if env_base:
+            base_port = int(env_base)
+        else:
+            base_port = random.randint(10000, 50000)
         self.base_port = base_port
         self._lock = threading.Lock()
         self._servers: Dict[str, List[Dict[str, Any]]] = {}  # model -> list of {process, port, url, gpu_ids}
@@ -732,7 +736,7 @@ def get_server_manager() -> VLLMServerManager:
 
 
 def _get_vllm_max_model_len() -> int:
-    value = os.environ.get("VLLM_MAX_MODEL_LEN", "4096")
+    value = os.environ.get("VLLM_MAX_MODEL_LEN", "16384")
     try:
         parsed = int(value)
     except ValueError:
