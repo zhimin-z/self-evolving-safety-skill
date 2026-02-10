@@ -819,7 +819,7 @@ class ModelRouter:
                 messages=messages,
                 api_base=api_base,
                 api_key="unused",
-                timeout=120,
+                timeout=int(os.getenv("VLLM_REQUEST_TIMEOUT", "600")),
                 **kwargs,
             )
         except Exception as e:
