@@ -72,6 +72,45 @@ def _is_local_model(model_name: str) -> bool:
             return True
 
     # Default: try local if not obviously closed-source
+    return True
+
+def _strip_model_prefixes_preserve_case(model_name: str) -> str:
+    lower = model_name.lower()
+    for prefix in ["openrouter/", "vllm/", "sglang/", "local/"]:
+        if lower.startswith(prefix):
+            return model_name[len(prefix):]
+    return model_name
+
+
+
+def _estimate_message_chars(messages: List[Dict[str, Any]]) -> Dict[str, int]:
+    total = 0
+    max_single = 0
+    for msg in messages or []:
+        content = msg.get("content", "") if isinstance(msg, dict) else ""
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    text_part = item.get("text") or item.get("content") or ""
+                    parts.append(text_part)
+                elif isinstance(item, str):
+                    parts.append(item)
+            content = "".join(parts)
+        if not isinstance(content, str):
+            content = str(content)
+        total += len(content)
+        if len(content) > max_single:
+            max_single = len(content)
+    return {"total": total, "max_single": max_single, "count": len(messages or [])}
+
+
+    # Check if matches local patterns
+    for pattern in LOCAL_MODEL_PATTERNS:
+        if normalized.startswith(pattern.lower()):
+            return True
+
+    # Default: try local if not obviously closed-source
     return False
 
 
@@ -164,6 +203,7 @@ class VLLMServerManager:
     """
 
     def __init__(self, base_port: int = 30000, failure_cooldown: int = 300):
+        base_port = int(os.getenv("VLLM_BASE_PORT", str(base_port)))
         self.base_port = base_port
         self._lock = threading.Lock()
         self._servers: Dict[str, List[Dict[str, Any]]] = {}  # model -> list of {process, port, url, gpu_ids}
@@ -174,7 +214,7 @@ class VLLMServerManager:
         self._gpu_ids = _get_gpu_ids()
         self._gpu_env_snapshot = _get_cuda_visible_devices()  # track GPU set at launch
         self._unhealthy_urls: Dict[str, float] = {}  # url -> timestamp of failure
-        self._unhealthy_ttl = 1800  # 30 min — if a server fails, it's likely dead for the run
+        self._unhealthy_ttl = int(os.getenv("VLLM_UNHEALTHY_TTL", "1800"))  # 30 min — if a server fails, it's likely dead for the run
 
         # Register cleanup on exit
         atexit.register(self.shutdown_all)
@@ -335,7 +375,7 @@ class VLLMServerManager:
             "--tensor-parallel-size", str(tp_size),
             "--host", "0.0.0.0",
             "--trust-remote-code",
-            "--max-model-len", "4096",
+            "--max-model-len", str(_get_vllm_max_model_len()),
         ]
         if tp_size >= 2:
             cmd.append("--enable-chunked-prefill")
@@ -488,7 +528,7 @@ class VLLMServerManager:
                             "--tensor-parallel-size", "1",
                             "--host", "0.0.0.0",
                             "--trust-remote-code",
-                            "--max-model-len", "4096",
+                            "--max-model-len", str(_get_vllm_max_model_len()),
                         ]
                         env = os.environ.copy()
                         env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
@@ -691,6 +731,19 @@ def get_server_manager() -> VLLMServerManager:
     return _server_manager
 
 
+def _get_vllm_max_model_len() -> int:
+    value = os.environ.get("VLLM_MAX_MODEL_LEN", "4096")
+    try:
+        parsed = int(value)
+    except ValueError:
+        logger.warning(f"Invalid VLLM_MAX_MODEL_LEN '{value}', using 4096")
+        return 4096
+    if parsed <= 0:
+        logger.warning(f"Non-positive VLLM_MAX_MODEL_LEN '{value}', using 4096")
+        return 4096
+    return parsed
+
+
 class ModelRouter:
     """Routes model requests to vLLM (local) or OpenRouter (remote) based on availability."""
 
@@ -734,7 +787,7 @@ class ModelRouter:
 
         # Check if this is a local-deployable model
         if self.auto_deploy and _is_local_model(model_name):
-            return "vllm", self._normalize_model_name(model_name)
+            return "vllm", _strip_model_prefixes_preserve_case(model_name)
 
         # Fall back to OpenRouter
         if not model_name.startswith("openrouter/"):
@@ -765,7 +818,11 @@ class ModelRouter:
                 **kwargs,
             )
         except Exception as e:
-            logger.error(f"_vllm_completion failed: model={litellm_model}, url={api_base}, error={type(e).__name__}: {e}")
+            msg_sizes = _estimate_message_chars(messages)
+            logger.error(
+                f"_vllm_completion failed: model={litellm_model}, url={api_base}, error={type(e).__name__}: {e}, "
+                f"msg_chars={msg_sizes['total']}, max_msg_chars={msg_sizes['max_single']}, msg_count={msg_sizes['count']}"
+            )
             raise
 
     def completion(
