@@ -219,7 +219,7 @@ class VLLMServerManager:
         self._gpu_ids = _get_gpu_ids()
         self._gpu_env_snapshot = _get_cuda_visible_devices()  # track GPU set at launch
         self._unhealthy_urls: Dict[str, float] = {}  # url -> timestamp of failure
-        self._unhealthy_ttl = int(os.getenv("VLLM_UNHEALTHY_TTL", "1800"))  # 30 min — if a server fails, it's likely dead for the run
+        self._unhealthy_ttl = int(os.getenv("VLLM_UNHEALTHY_TTL", "300"))  # 5 min fallback (auto-restart handles most cases)
 
         # Register cleanup on exit
         atexit.register(self.shutdown_all)
@@ -638,9 +638,56 @@ class VLLMServerManager:
         return None
 
     def mark_unhealthy(self, url: str):
-        """Mark a server URL as temporarily unhealthy (skipped for _unhealthy_ttl seconds)."""
+        """Kill the dead/hung server and attempt to restart it on the same GPU/port.
+
+        Falls back to marking the URL as temporarily unhealthy if restart fails.
+        """
         self._unhealthy_urls[url] = time.time()
-        logger.warning(f"Marked {url} as unhealthy (will skip for {self._unhealthy_ttl}s)")
+
+        # Find the instance matching this URL
+        instance = None
+        instance_model = None
+        instance_idx = None
+        for normalized, instances in self._servers.items():
+            for idx, inst in enumerate(instances):
+                if inst["url"] == url:
+                    instance = inst
+                    instance_model = normalized
+                    instance_idx = idx
+                    break
+            if instance:
+                break
+
+        if not instance:
+            logger.warning(f"Marked {url} as unhealthy (no matching instance found for restart)")
+            return
+
+        process = instance["process"]
+        port = instance["port"]
+        gpu_ids = instance["gpu_ids"]
+        model_name = instance["model"]
+
+        # Kill the process and free the port
+        try:
+            if process.poll() is None:
+                logger.info(f"Killing hung vLLM server on port {port} (PID {process.pid})")
+                process.kill()
+            process.wait(timeout=10)
+        except Exception as e:
+            logger.warning(f"Failed to cleanly kill PID {process.pid}: {e}")
+
+        # Attempt restart on the same GPU/port
+        logger.info(f"Restarting vLLM server for {model_name} on port {port}, gpus={gpu_ids}")
+        new_info = self._start_single_server(model_name, tp_size=1, gpu_ids=gpu_ids, port=port)
+
+        if new_info is not None:
+            # Replace the dead instance in the pool
+            self._servers[instance_model][instance_idx] = new_info
+            self._unhealthy_urls.pop(url, None)
+            logger.info(f"Successfully restarted vLLM server at {url}")
+        else:
+            logger.error(f"Failed to restart vLLM server on port {port}. "
+                         f"Marked {url} as unhealthy (will skip for {self._unhealthy_ttl}s)")
 
     def get_next_server_url(self, model_name: str) -> Optional[str]:
         """Return the next healthy server URL via round-robin.
@@ -813,13 +860,22 @@ class ModelRouter:
         """
         litellm_model = f"hosted_vllm/{model}"
         api_base = f"{url}/v1"
+
+        # Fast liveness check: verify server is alive before committing to a long request
+        try:
+            probe = requests.get(f"{url}/v1/models", timeout=3)
+            if probe.status_code != 200:
+                raise ConnectionError(f"Liveness check failed: status {probe.status_code}")
+        except requests.RequestException as e:
+            raise ConnectionError(f"Server {url} is not reachable (liveness check): {e}") from e
+
         try:
             return litellm.completion(
                 model=litellm_model,
                 messages=messages,
                 api_base=api_base,
                 api_key="unused",
-                timeout=int(os.getenv("VLLM_REQUEST_TIMEOUT", "600")),
+                timeout=int(os.getenv("VLLM_REQUEST_TIMEOUT", "120")),
                 **kwargs,
             )
         except Exception as e:

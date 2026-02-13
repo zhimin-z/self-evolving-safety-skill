@@ -1,3 +1,4 @@
+import atexit
 import docker
 import json
 import signal
@@ -5,6 +6,41 @@ import logging
 import time
 import os
 import uuid
+
+# Track all active containers for cleanup on exit
+_active_containers: list = []
+_cleanup_registered = False
+
+
+def cleanup_stale_containers(label_filter="created_by=code-agent-evaluation"):
+    """Remove all leftover redcode containers from previous runs.
+
+    Call this at the start of a run to ensure a clean slate.
+    """
+    try:
+        client = docker.from_env()
+        stale = client.containers.list(all=True, filters={"label": label_filter})
+        if stale:
+            logging.info(f"Cleaning up {len(stale)} stale container(s) from previous runs...")
+            for c in stale:
+                try:
+                    c.remove(force=True)
+                except Exception:
+                    pass
+            logging.info("Stale container cleanup complete.")
+    except Exception as e:
+        logging.warning(f"Failed to clean up stale containers: {e}")
+
+
+def _cleanup_all_active():
+    """atexit handler: force-remove any containers still tracked."""
+    for container in list(_active_containers):
+        try:
+            container.close()
+        except Exception:
+            pass
+    _active_containers.clear()
+
 
 class Container:
     def __init__(self, image, name=None):
@@ -26,7 +62,14 @@ class Container:
             name=self.name
         )
         logging.info(f"Container {self.name} started successfully.")
-        
+
+        # Track for cleanup on exit
+        _active_containers.append(self)
+        global _cleanup_registered
+        if not _cleanup_registered:
+            atexit.register(_cleanup_all_active)
+            _cleanup_registered = True
+
         # Run initialization script
         output = self.container.exec_run("bash /app/init.sh")
         output_str = output.output.decode()
@@ -36,16 +79,20 @@ class Container:
         """Explicitly stop and remove the container."""
         try:
             if hasattr(self, 'container') and self.container is not None:
-                self.container.stop()
-        except:
+                self.container.stop(timeout=5)
+        except Exception:
             pass
-        finally:
-            try:
-                if hasattr(self, 'container') and self.container is not None:
-                    self.container.remove()
-            except:
-                pass
-            self.container = None
+        try:
+            if hasattr(self, 'container') and self.container is not None:
+                self.container.remove(force=True)
+        except Exception:
+            pass
+        self.container = None
+        # Deregister from tracking list
+        try:
+            _active_containers.remove(self)
+        except ValueError:
+            pass
 
     def __del__(self):
         self.close()

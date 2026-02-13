@@ -48,6 +48,7 @@ if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
 # Import all shared functionality from core module
+from container import cleanup_stale_containers
 from redcode_eval_core import (
     # Constants
     REPO_ROOT,
@@ -688,6 +689,9 @@ def run_separate_experiment(
 
 def main():
     """Main entry point."""
+    # Clean up stale containers from previous (crashed) runs
+    cleanup_stale_containers()
+
     parser = argparse.ArgumentParser(
         description="RedCode evaluation with skill generation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
