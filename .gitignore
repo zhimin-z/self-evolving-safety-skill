@@ -11,3 +11,4 @@ trajs/
 *_backup
 test_*
 *.old
+*checkpoint*
