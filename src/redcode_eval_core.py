@@ -2512,6 +2512,45 @@ def _eval_single_exec_item(
         container.close()
 
 
+# ---------------------------------------------------------------------------
+# Crash-resilient checkpoint helpers
+# ---------------------------------------------------------------------------
+
+def _checkpoint_path(result_base: str, result_filename: str) -> str:
+    """Return the checkpoint file path for a given result filename."""
+    return os.path.join(result_base, result_filename.replace(".json", "_checkpoint.jsonl"))
+
+
+def _load_checkpoint(ckpt_path: str) -> Dict[str, Dict]:
+    """Load completed case results from a JSONL checkpoint file.
+
+    Returns:
+        Dict mapping case_id -> result dict
+    """
+    completed = {}
+    if os.path.exists(ckpt_path):
+        with open(ckpt_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    completed[entry["case_id"]] = entry
+                except (json.JSONDecodeError, KeyError):
+                    continue
+        if completed:
+            print(f"  [Resume] Loaded {len(completed)} completed case(s) from checkpoint")
+    return completed
+
+
+def _append_checkpoint(ckpt_path: str, result: Dict, lock: threading.Lock):
+    """Append a single result to the checkpoint file (thread-safe)."""
+    with lock:
+        with open(ckpt_path, "a") as f:
+            f.write(json.dumps(result) + "\n")
+
+
 def eval_exec_cases(
     cases: List[Dict],
     config: dict,
@@ -2561,13 +2600,32 @@ def eval_exec_cases(
                 "case_id": f"{base_case_id}_{input_type}",
             })
 
-    print(f"  [RedCode-Exec] {len(work_items)} work items from {len(cases)} cases")
+    # Pre-compute result filename for checkpoint
+    unique_dataset_ids = sorted(set(case["dataset_id"] for case in cases))
+    result_filename = generate_result_filename(
+        data_split, unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
+        is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
+    )
+    ckpt_path = _checkpoint_path(result_base, result_filename)
+
+    # Load checkpoint: skip already-completed cases
+    ckpt_results = _load_checkpoint(ckpt_path)
+    total_items = len(work_items)
+    if ckpt_results:
+        work_items = [item for item in work_items if item["case_id"] not in ckpt_results]
+        print(f"  [RedCode-Exec] {total_items} total, {len(ckpt_results)} cached, {len(work_items)} remaining")
+    else:
+        print(f"  [RedCode-Exec] {total_items} work items from {len(cases)} cases")
 
     # --- Execute (parallel or sequential) ---
-    all_results = []
+    all_results = list(ckpt_results.values())
     all_trajectories = []
     res_prompt_type = {t: [] for t in ALL_EXEC_INPUT_TYPES}
-    completed = 0
+    # Pre-fill scores from checkpoint
+    for r in ckpt_results.values():
+        if r.get("input_type") in res_prompt_type:
+            res_prompt_type[r["input_type"]].append(r["score"])
+    completed = len(ckpt_results)
     lock = threading.Lock()
 
     def process_item(item):
@@ -2584,13 +2642,14 @@ def eval_exec_cases(
             agent_type=agent_type,
             dry_run=dry_run,
         )
+        _append_checkpoint(ckpt_path, result, lock)
         with lock:
             all_results.append(result)
             res_prompt_type[item["input_type"]].append(result["score"])
             if trajectory:
                 all_trajectories.append(trajectory)
             completed += 1
-            print(f"    [{completed}/{len(work_items)}] {item['case_id']}  score={result['score']}")
+            print(f"    [{completed}/{total_items}] {item['case_id']}  score={result['score']}")
         return result
 
     if workers <= 1:
@@ -2605,8 +2664,6 @@ def eval_exec_cases(
     duration = time.time() - start_time
     scores = [r['score'] for r in all_results]
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
-    unique_dataset_ids = sorted(set(case["dataset_id"] for case in cases))
 
     eval_log = {
         "Agent": agent_name,
@@ -2629,10 +2686,6 @@ def eval_exec_cases(
         },
     }
 
-    result_filename = generate_result_filename(
-        data_split, unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
-        is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
-    )
     resfile = os.path.join(result_base, result_filename)
 
     with open(resfile, "w") as f:
@@ -2643,6 +2696,11 @@ def eval_exec_cases(
         traj_dir = os.path.join(traj_base, result_filename)
         save_trajectories(all_trajectories, traj_dir)
         print(f"  Trajectories saved to: {traj_dir}")
+
+    # Clean up checkpoint file after successful completion
+    if os.path.exists(ckpt_path):
+        os.remove(ckpt_path)
+        print(f"  Checkpoint cleaned up: {ckpt_path}")
 
     print(f"\n  Results saved to: {resfile}")
     return eval_log
@@ -2737,12 +2795,27 @@ def eval_gen_cases(
         case_id = f"{case['dataset_id']}_{case['index']}"
         work_items.append({"case": case, "case_id": case_id})
 
-    print(f"  [RedCode-Gen] {len(work_items)} work items")
+    # Pre-compute result filename for checkpoint
+    unique_dataset_ids = sorted(set(case["dataset_id"] for case in cases))
+    result_filename = generate_result_filename(
+        data_split, unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
+        is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
+    )
+    ckpt_path = _checkpoint_path(result_base, result_filename)
+
+    # Load checkpoint: skip already-completed cases
+    ckpt_results = _load_checkpoint(ckpt_path)
+    total_items = len(work_items)
+    if ckpt_results:
+        work_items = [item for item in work_items if item["case_id"] not in ckpt_results]
+        print(f"  [RedCode-Gen] {total_items} total, {len(ckpt_results)} cached, {len(work_items)} remaining")
+    else:
+        print(f"  [RedCode-Gen] {total_items} work items")
 
     # --- Execute (parallel or sequential) ---
-    all_results = []
+    all_results = list(ckpt_results.values())
     all_trajectories = []
-    completed = 0
+    completed = len(ckpt_results)
     lock = threading.Lock()
 
     def process_item(item):
@@ -2757,12 +2830,13 @@ def eval_gen_cases(
             agent_type=agent_type,
             dry_run=dry_run,
         )
+        _append_checkpoint(ckpt_path, result, lock)
         with lock:
             all_results.append(result)
             if trajectory:
                 all_trajectories.append(trajectory)
             completed += 1
-            print(f"    [{completed}/{len(work_items)}] {item['case_id']}  score={result['score']}")
+            print(f"    [{completed}/{total_items}] {item['case_id']}  score={result['score']}")
         return result
 
     if workers <= 1:
@@ -2777,8 +2851,6 @@ def eval_gen_cases(
     scores = [r['score'] for r in all_results]
     score_dist = dict(Counter(scores))
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
-    unique_dataset_ids = sorted(set(case["dataset_id"] for case in cases))
 
     eval_log = {
         "Agent": agent_name,
@@ -2798,10 +2870,6 @@ def eval_gen_cases(
         },
     }
 
-    result_filename = generate_result_filename(
-        data_split, unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
-        is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
-    )
     resfile = os.path.join(result_base, result_filename)
 
     with open(resfile, "w") as f:
@@ -2812,6 +2880,11 @@ def eval_gen_cases(
         traj_dir = os.path.join(traj_base, result_filename)
         save_trajectories(all_trajectories, traj_dir)
         print(f"  Trajectories saved to: {traj_dir}")
+
+    # Clean up checkpoint file after successful completion
+    if os.path.exists(ckpt_path):
+        os.remove(ckpt_path)
+        print(f"  Checkpoint cleaned up: {ckpt_path}")
 
     print(f"\n  Results saved to: {resfile}")
     return eval_log

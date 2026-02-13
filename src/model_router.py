@@ -195,6 +195,64 @@ def _estimate_tp_size(model_name: str, gpu_count: int) -> int:
     return 1
 
 
+def cleanup_stale_vllm_processes():
+    """Kill orphaned vLLM server processes from previous (crashed) runs.
+
+    This catches processes that survive after the parent script is killed/Ctrl+Z'd.
+    Kills the entire process tree (server + EngineCore workers) to ensure
+    both GPU memory and ports are fully released.
+    """
+    import psutil
+
+    current_pid = os.getpid()
+    to_kill = []  # collect all processes first, then kill
+
+    for proc in psutil.process_iter(["pid", "ppid", "name", "cmdline"]):
+        try:
+            info = proc.info
+            if info["pid"] == current_pid:
+                continue
+            cmdline = " ".join(info["cmdline"] or [])
+            is_vllm_server = "vllm.entrypoints.openai.api_server" in cmdline
+            is_engine_core = (info["name"] or "").startswith("VLLM::EngineCore")
+            if is_vllm_server or is_engine_core:
+                to_kill.append(proc)
+                # Also collect all child processes (EngineCore workers, etc.)
+                try:
+                    for child in proc.children(recursive=True):
+                        if child.pid != current_pid:
+                            to_kill.append(child)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    if not to_kill:
+        return
+
+    # Kill all collected processes
+    killed_pids = set()
+    for proc in to_kill:
+        try:
+            if proc.pid not in killed_pids:
+                proc.kill()
+                killed_pids.add(proc.pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    # Wait for all killed processes to fully exit (releases ports + GPU memory)
+    gone, alive = psutil.wait_procs(to_kill, timeout=10)
+    for proc in alive:
+        try:
+            proc.kill()  # force-kill anything still lingering
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    logger.info(f"Cleaned up {len(killed_pids)} stale vLLM process(es): {sorted(killed_pids)}")
+    # Brief extra wait for GPU memory and port release
+    time.sleep(2)
+
+
 class VLLMServerManager:
     """
     Manages vLLM server lifecycle with thread-safe operations.
@@ -204,6 +262,9 @@ class VLLMServerManager:
     """
 
     def __init__(self, base_port: int = 30000, failure_cooldown: int = 300):
+        # Kill any orphaned vLLM processes from previous runs
+        cleanup_stale_vllm_processes()
+
         env_base = os.environ.get("VLLM_BASE_PORT")
         if env_base:
             base_port = int(env_base)
@@ -381,6 +442,7 @@ class VLLMServerManager:
             "--host", "0.0.0.0",
             "--trust-remote-code",
             "--max-model-len", str(_get_vllm_max_model_len()),
+            "--gpu-memory-utilization", _get_vllm_gpu_memory_utilization(),
         ]
         if tp_size >= 2:
             cmd.append("--enable-chunked-prefill")
@@ -525,7 +587,10 @@ class VLLMServerManager:
                           f"in parallel (loading from cache)...")
 
                     pending = []  # (gpu_id, port, process)
-                    for gpu_id, port in remaining_gpus:
+                    # Stagger launches in batches of 2 to avoid CUDA context
+                    # initialization overlap that causes GPU OOM on startup.
+                    batch_size = 2
+                    for i, (gpu_id, port) in enumerate(remaining_gpus):
                         cmd = [
                             "python", "-m", "vllm.entrypoints.openai.api_server",
                             "--model", model_name,
@@ -534,6 +599,7 @@ class VLLMServerManager:
                             "--host", "0.0.0.0",
                             "--trust-remote-code",
                             "--max-model-len", str(_get_vllm_max_model_len()),
+                            "--gpu-memory-utilization", _get_vllm_gpu_memory_utilization(),
                         ]
                         env = os.environ.copy()
                         env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
@@ -549,6 +615,9 @@ class VLLMServerManager:
                             logger.info(f"Launched vLLM on GPU {gpu_id}, port {port}")
                         except Exception as e:
                             logger.error(f"Failed to launch vLLM on GPU {gpu_id}: {e}")
+                        # Stagger: pause between batches to let CUDA init settle
+                        if (i + 1) % batch_size == 0 and i + 1 < len(remaining_gpus):
+                            time.sleep(5)
 
                     # Wait for all remaining to become healthy
                     deadline = time.time() + 600
@@ -638,9 +707,11 @@ class VLLMServerManager:
         return None
 
     def mark_unhealthy(self, url: str):
-        """Kill the dead/hung server and attempt to restart it on the same GPU/port.
+        """Kill the dead/hung server and restart it asynchronously in the background.
 
-        Falls back to marking the URL as temporarily unhealthy if restart fails.
+        The kill is done synchronously (fast) to free GPU memory and ports.
+        The restart is done in a background thread so the retry loop can
+        immediately try other healthy servers.
         """
         self._unhealthy_urls[url] = time.time()
 
@@ -667,27 +738,45 @@ class VLLMServerManager:
         gpu_ids = instance["gpu_ids"]
         model_name = instance["model"]
 
-        # Kill the process and free the port
+        # Kill the entire process tree (server + EngineCore workers) to free port + GPU
         try:
-            if process.poll() is None:
-                logger.info(f"Killing hung vLLM server on port {port} (PID {process.pid})")
-                process.kill()
-            process.wait(timeout=10)
+            import psutil
+            parent = psutil.Process(process.pid)
+            children = parent.children(recursive=True)
+            for child in children:
+                try:
+                    child.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            parent.kill()
+            psutil.wait_procs([parent] + children, timeout=10)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
         except Exception as e:
-            logger.warning(f"Failed to cleanly kill PID {process.pid}: {e}")
+            # Fallback: just kill the main process
+            try:
+                process.kill()
+                process.wait(timeout=10)
+            except Exception:
+                pass
+            logger.warning(f"Fallback kill for PID {process.pid}: {e}")
 
-        # Attempt restart on the same GPU/port
-        logger.info(f"Restarting vLLM server for {model_name} on port {port}, gpus={gpu_ids}")
-        new_info = self._start_single_server(model_name, tp_size=1, gpu_ids=gpu_ids, port=port)
+        # Restart asynchronously so the retry loop can immediately try other servers
+        def _restart_in_background():
+            time.sleep(1)  # brief wait for port release
+            logger.info(f"[bg] Restarting vLLM server for {model_name} on port {port}, gpus={gpu_ids}")
+            new_info = self._start_single_server(model_name, tp_size=1, gpu_ids=gpu_ids, port=port)
+            if new_info is not None:
+                with self._lock:
+                    self._servers[instance_model][instance_idx] = new_info
+                    self._unhealthy_urls.pop(url, None)
+                logger.info(f"[bg] Successfully restarted vLLM server at {url}")
+            else:
+                logger.error(f"[bg] Failed to restart vLLM server on port {port}. "
+                             f"Marked {url} as unhealthy (will skip for {self._unhealthy_ttl}s)")
 
-        if new_info is not None:
-            # Replace the dead instance in the pool
-            self._servers[instance_model][instance_idx] = new_info
-            self._unhealthy_urls.pop(url, None)
-            logger.info(f"Successfully restarted vLLM server at {url}")
-        else:
-            logger.error(f"Failed to restart vLLM server on port {port}. "
-                         f"Marked {url} as unhealthy (will skip for {self._unhealthy_ttl}s)")
+        restart_thread = threading.Thread(target=_restart_in_background, daemon=True)
+        restart_thread.start()
 
     def get_next_server_url(self, model_name: str) -> Optional[str]:
         """Return the next healthy server URL via round-robin.
@@ -794,6 +883,16 @@ def _get_vllm_max_model_len() -> int:
         logger.warning(f"Non-positive VLLM_MAX_MODEL_LEN '{value}', using 4096")
         return 4096
     return parsed
+
+
+def _get_vllm_gpu_memory_utilization() -> str:
+    """Get GPU memory utilization fraction for vLLM (default 0.9).
+
+    Matches vLLM's default. Startup OOM is handled by stale process cleanup
+    and staggered Phase 2 launch rather than reducing memory utilization.
+    Override via VLLM_GPU_MEMORY_UTILIZATION env var if needed.
+    """
+    return os.environ.get("VLLM_GPU_MEMORY_UTILIZATION", "0.9")
 
 
 class ModelRouter:
@@ -924,15 +1023,30 @@ class ModelRouter:
                     except Exception as e:
                         last_error = e
                         self._server_manager.mark_unhealthy(server_url)
-                        logger.warning(f"vLLM attempt {attempt + 1}/3 failed on {server_url}: {type(e).__name__}")
+                        logger.warning(f"VLLM attempt {attempt + 1}/3 failed on {server_url}: {type(e).__name__}")
+                        if attempt < 2:
+                            time.sleep(2)  # brief pause before trying next server
                         continue
 
-                # All attempts exhausted — raise for local models (no silent fallback)
-                if last_error:
-                    if _is_local_model(model):
-                        raise RuntimeError(
-                            f"All vLLM attempts failed for local model '{model}': {last_error}"
-                        ) from last_error
+                # All 3 fast retries exhausted. Servers may be restarting in background.
+                # Wait up to 120s for any server to come back, then try once more.
+                if last_error and _is_local_model(model):
+                    logger.warning("All fast retries exhausted. Waiting for background server restarts...")
+                    for wait_step in range(60):
+                        time.sleep(2)
+                        server_url = self._server_manager.get_next_server_url(original_model)
+                        if server_url:
+                            try:
+                                probe = requests.get(f"{server_url}/v1/models", timeout=3)
+                                if probe.status_code == 200:
+                                    logger.info(f"Server {server_url} recovered, retrying request")
+                                    return self._vllm_completion(server_url, formatted_model, messages, **kwargs)
+                            except requests.RequestException:
+                                pass
+                    raise RuntimeError(
+                        f"All vLLM attempts failed for local model '{model}' "
+                        f"(including 120s recovery wait): {last_error}"
+                    ) from last_error
             else:
                 if _is_local_model(model):
                     raise RuntimeError(
