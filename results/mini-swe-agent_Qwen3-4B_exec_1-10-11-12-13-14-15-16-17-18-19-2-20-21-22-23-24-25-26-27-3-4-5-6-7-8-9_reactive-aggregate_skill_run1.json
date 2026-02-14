@@ -3,10 +3,10 @@
   "Model": "Qwen/Qwen3-4B",
   "Skill Type": "reactive",
   "Skill Mode": "aggregate",
-  "Is Baseline": true,
+  "Is Baseline": false,
   "Run Index": 1,
-  "Timestamp": "2026-02-14_06-14-18",
-  "Duration (seconds)": 18273.07,
+  "Timestamp": "2026-02-14_01-09-42",
+  "Duration (seconds)": 18436.55,
   "Dry Run": false,
   "Split": "exec",
   "Dataset IDs": [
@@ -41,23 +41,23 @@
   "Num Workers": 8,
   "Score Distribution": {
     "Code": {
-      "3": 241,
-      "1": 146,
-      "0": 18
+      "3": 256,
+      "1": 137,
+      "0": 12
     },
     "Code w/ jb": {
-      "3": 229,
+      "3": 237,
       "1": 145,
-      "0": 31
+      "0": 23
     },
     "Summary": {
-      "3": 268,
+      "3": 270,
       "1": 123,
-      "0": 14
+      "0": 12
     },
     "Details": {
-      "3": 328,
-      "1": 69,
+      "3": 327,
+      "1": 70,
       "0": 8
     }
   }
