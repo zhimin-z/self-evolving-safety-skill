@@ -145,6 +145,35 @@ def _log_prompt_size(label: str, prompt: str, extra: Optional[Dict[str, int]] = 
     print(f"  [PromptSize] {label}: chars={prompt_len}{extra_str}")
 
 
+def _calculate_safe_max_tokens(prompt_chars: int, model: str) -> int:
+    """Calculate safe max_tokens based on prompt size and model context limit.
+
+    Args:
+        prompt_chars: Number of characters in the prompt
+        model: Model name (e.g., "Qwen/Qwen3-4B")
+
+    Returns:
+        Safe max_tokens value that won't exceed context window
+    """
+    # Get model context limit
+    model_lower = model.lower()
+    context_limit = DEFAULT_MODEL_CONTEXT
+    for key, limit in MODEL_CONTEXT_LIMITS.items():
+        if key.lower() in model_lower:
+            context_limit = limit
+            break
+
+    # Estimate input tokens (rough: 4 chars per token)
+    estimated_input_tokens = prompt_chars // 4
+
+    # Reserve space for input + safety margin (20%)
+    safety_margin = int(context_limit * 0.2)
+    available_tokens = context_limit - estimated_input_tokens - safety_margin
+
+    # Cap at reasonable values
+    max_tokens = max(512, min(available_tokens, 4096))
+
+    return max_tokens
 
 
 # Load environment variables
@@ -221,6 +250,14 @@ AGENT_TYPE_DISPLAY_NAMES = {
 SAFETY_STANDARDS_DIR = os.path.join(_REPO_ROOT, "safety_standards")
 
 MAX_SKILL_CHARS = 14000
+
+# Model context limits (in tokens) - used to calculate safe max_tokens
+MODEL_CONTEXT_LIMITS = {
+    "qwen3-4b": 16384,
+    "qwen/qwen3-4b": 16384,
+    # Add other models as needed
+}
+DEFAULT_MODEL_CONTEXT = 128000  # For larger models
 
 # ---------------------------------------------------------------------------
 # GPU / Worker Utilities
@@ -2027,12 +2064,16 @@ Generate the initial skill now:"""
 
     _log_prompt_size("skill_init_reactive", prompt, {"chunk_chars": len(chunk_content)})
 
+    # Calculate safe max_tokens based on prompt size and model context
+    safe_max_tokens = _calculate_safe_max_tokens(len(prompt), model)
+
     try:
+        print(f"  Generating initial skill (max_tokens={safe_max_tokens})...")
         response = completion_with_retry(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=8192
+            max_tokens=safe_max_tokens
         )
         content = _get_completion_content(response)
         if not content or not content.strip():
@@ -2107,12 +2148,16 @@ Generate the initial skill now:"""
 
     _log_prompt_size("skill_init_proactive", prompt, {"chunk_chars": len(chunk_content)})
 
+    # Calculate safe max_tokens based on prompt size and model context
+    safe_max_tokens = _calculate_safe_max_tokens(len(prompt), model)
+
     try:
+        print(f"  Generating initial skill (max_tokens={safe_max_tokens})...")
         response = completion_with_retry(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=8192
+            max_tokens=safe_max_tokens
         )
         content = _get_completion_content(response)
         if not content or not content.strip():
@@ -2182,13 +2227,16 @@ Generate the complete security skill now:"""
 
     _log_prompt_size("skill_init_constitutional", prompt, {"chunk_chars": len(chunk_text)})
 
+    # Calculate safe max_tokens based on prompt size and model context
+    safe_max_tokens = _calculate_safe_max_tokens(len(prompt), model)
+
     try:
-        print("  Generating initial skill...")
+        print(f"  Generating initial skill (max_tokens={safe_max_tokens})...")
         response = completion_with_retry(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=8192
+            max_tokens=safe_max_tokens
         )
         content = _get_completion_content(response)
         if not content or not content.strip():
@@ -2273,13 +2321,16 @@ Return ONLY the updated skill content:"""
 
     _log_prompt_size("skill_refine", prompt, {"existing_skill_chars": len(existing_skill), "chunk_chars": len(content)})
 
+    # Calculate safe max_tokens based on prompt size and model context
+    safe_max_tokens = _calculate_safe_max_tokens(len(prompt), model)
+
     try:
-        print("  Refining skill...")
+        print(f"  Refining skill (max_tokens={safe_max_tokens})...")
         response = completion_with_retry(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=8192
+            max_tokens=safe_max_tokens
         )
         content = _get_completion_content(response)
         if not content or not content.strip():
@@ -2287,7 +2338,16 @@ Return ONLY the updated skill content:"""
             print(f"  Response type: {type(response).__name__}")
             print(f"  Response summary: {_summarize_response(response)}")
             return None
-        return extract_markdown(content)
+
+        refined_skill = extract_markdown(content)
+
+        # Validate size - if over limit, warn and return existing skill
+        if refined_skill and len(refined_skill) > MAX_SKILL_CHARS:
+            print(f"  WARNING: Refined skill ({len(refined_skill)} chars) exceeds MAX_SKILL_CHARS ({MAX_SKILL_CHARS})")
+            print(f"  Keeping existing skill ({len(existing_skill)} chars) to prevent unbounded growth")
+            return existing_skill
+
+        return refined_skill
     except Exception as e:
         print(f"  Error refining skill: {e}")
         return None
@@ -2946,6 +3006,11 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
                 if skill_content is None:
                     skill_content = generate_initial_skill_constitutional(chunk_text, doc["source"], model=model)
                 else:
+                    # Early stopping: skip refinement if skill is near size limit (90%)
+                    if len(skill_content) >= MAX_SKILL_CHARS * 0.9:
+                        print(f"  Skill size ({len(skill_content)} chars) near limit ({MAX_SKILL_CHARS}), skipping further refinement")
+                        break
+
                     skill_content = refine_skill(
                         skill_content, chunk_text, doc["source"],
                         chunk_idx, chunk_total, skill_type, model=model
@@ -2954,6 +3019,11 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
                 if not skill_content:
                     print("Error: Failed to generate/refine skill")
                     sys.exit(1)
+
+            # Also check at document level
+            if skill_content and len(skill_content) >= MAX_SKILL_CHARS * 0.9:
+                print(f"  Skill complete ({len(skill_content)} chars), stopping iteration")
+                break
 
         save_skill(skill_content, skill_type, output_dir, run_idx=run_idx, skill_mode=skill_mode, model_name=model or "", agent_type=agent_type)
 
@@ -2978,6 +3048,11 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
         skill_content = None
 
         for chunk_num, total_chunks, chunk_cases in iter_case_chunks(cases, CHUNK_SIZE_CHARS):
+            # Early stopping: skip refinement if skill is near size limit (90%)
+            if skill_content and len(skill_content) >= MAX_SKILL_CHARS * 0.9:
+                print(f"  Skill size ({len(skill_content)} chars) near limit ({MAX_SKILL_CHARS}), skipping further refinement")
+                break
+
             case_indices = (
                 f"{chunk_cases[0]['index']}" if len(chunk_cases) == 1
                 else f"{chunk_cases[0]['index']}...{chunk_cases[-1]['index']}"
