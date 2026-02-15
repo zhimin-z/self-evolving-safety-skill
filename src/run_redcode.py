@@ -298,18 +298,21 @@ def run_aggregate_experiment(
         def create_container():
             return Container("redcode")
 
-        # Separate test cases by split type
-        exec_test = [c for c in test_cases if c["split"] == "exec"]
-        gen_test = [c for c in test_cases if c["split"] == "gen"]
+        # Group test cases by dataset for per-dataset interleaving
+        from collections import defaultdict
+        exec_by_dataset = defaultdict(list)
+        for c in [c for c in test_cases if c["split"] == "exec"]:
+            exec_by_dataset[c["dataset_id"]].append(c)
+        gen_by_dataset = defaultdict(list)
+        for c in [c for c in test_cases if c["split"] == "gen"]:
+            gen_by_dataset[c["dataset_id"]].append(c)
 
-        # =====================================================================
-        # PART A: Evaluate WITH skill
-        # =====================================================================
-        print(f"\n  [A] Evaluating WITH {skill_type} skill on {len(test_cases)} test cases...")
-
-        if exec_test:
+        # Per-dataset interleaving: skill then baseline for each dataset
+        for dataset_id in sorted(exec_by_dataset.keys()):
+            ds_cases = exec_by_dataset[dataset_id]
+            print(f"\n  [A] Evaluating WITH {skill_type} skill on exec dataset {dataset_id} ({len(ds_cases)} test cases)...")
             eval_exec_cases(
-                cases=exec_test,
+                cases=ds_cases,
                 config=run_config,
                 container_factory=create_container,
                 step_limit=step_limit,
@@ -324,11 +327,10 @@ def run_aggregate_experiment(
                 is_baseline=False,
                 skill_mode="aggregate",
             )
-
-        if gen_test:
-            eval_gen_cases(
-                cases=gen_test,
-                config=run_config,
+            print(f"\n  [B] Evaluating BASELINE on exec dataset {dataset_id} ({len(ds_cases)} test cases)...")
+            eval_exec_cases(
+                cases=ds_cases,
+                config=config,
                 container_factory=create_container,
                 step_limit=step_limit,
                 timeout=timeout,
@@ -336,29 +338,6 @@ def run_aggregate_experiment(
                 agent_name=agent_name,
                 model_name=model_name,
                 skill_type=skill_type,
-                run_idx=run_idx,
-                dry_run=dry_run,
-                agent_type=agent_type,
-                is_baseline=False,
-                skill_mode="aggregate",
-            )
-
-        # =====================================================================
-        # PART B: Evaluate baseline (no skill) on same test cases for comparison
-        # =====================================================================
-        print(f"\n  [B] Evaluating BASELINE (no skill) on same {len(test_cases)} test cases...")
-
-        if exec_test:
-            eval_exec_cases(
-                cases=exec_test,
-                config=config,  # Original config WITHOUT skill injection
-                container_factory=create_container,
-                step_limit=step_limit,
-                timeout=timeout,
-                result_base=result_base,
-                agent_name=agent_name,
-                model_name=model_name,
-                skill_type=skill_type,  # Keep skill_type for context in filename
                 run_idx=run_idx,
                 dry_run=dry_run,
                 agent_type=agent_type,
@@ -366,17 +345,36 @@ def run_aggregate_experiment(
                 skill_mode="aggregate",
             )
 
-        if gen_test:
+        for dataset_id in sorted(gen_by_dataset.keys()):
+            ds_cases = gen_by_dataset[dataset_id]
+            print(f"\n  [A] Evaluating WITH {skill_type} skill on gen dataset {dataset_id} ({len(ds_cases)} test cases)...")
             eval_gen_cases(
-                cases=gen_test,
-                config=config,  # Original config WITHOUT skill injection
+                cases=ds_cases,
+                config=run_config,
                 container_factory=create_container,
                 step_limit=step_limit,
                 timeout=timeout,
                 result_base=result_base,
                 agent_name=agent_name,
                 model_name=model_name,
-                skill_type=skill_type,  # Keep skill_type for context in filename
+                skill_type=skill_type,
+                run_idx=run_idx,
+                dry_run=dry_run,
+                agent_type=agent_type,
+                is_baseline=False,
+                skill_mode="aggregate",
+            )
+            print(f"\n  [B] Evaluating BASELINE on gen dataset {dataset_id} ({len(ds_cases)} test cases)...")
+            eval_gen_cases(
+                cases=ds_cases,
+                config=config,
+                container_factory=create_container,
+                step_limit=step_limit,
+                timeout=timeout,
+                result_base=result_base,
+                agent_name=agent_name,
+                model_name=model_name,
+                skill_type=skill_type,
                 run_idx=run_idx,
                 dry_run=dry_run,
                 agent_type=agent_type,
@@ -840,6 +838,14 @@ Output:
         # Supports n_runs for repeated generation + evaluation
         output_dir = os.path.join(REPO_ROOT, "skills")
 
+        # Resolve all dataset IDs upfront for per-dataset interleaving
+        exec_ids = get_exec_dataset_ids(dataset_ids, all_datasets) if args.split in ('exec', 'all') else []
+        gen_ids = get_gen_dataset_ids(dataset_ids, all_datasets) if args.split in ('gen', 'all') else []
+
+        if not exec_ids and not gen_ids:
+            print("Error: No valid dataset IDs to evaluate")
+            sys.exit(1)
+
         for run_idx in range(1, args.n_runs + 1):
             if args.n_runs > 1:
                 print(f"\n{'='*60}")
@@ -852,47 +858,92 @@ Output:
             else:
                 skill_content = generate_skill(args.skill, args.split, dataset_ids, model=get_model_full_name(config), skill_mode=skill_mode, run_idx=run_idx, agent_type=args.agent)
 
-            print("=" * 60)
-            print(f"Running RedCode evaluation WITH constitutional skill (run {run_idx})")
-            print("=" * 60 + "\n")
+            # Per-dataset interleaving: for each dataset, run skill then baseline
+            for dataset_id in exec_ids:
+                print("=" * 60)
+                print(f"[Exec Dataset {dataset_id}] WITH constitutional skill (run {run_idx})")
+                print("=" * 60 + "\n")
 
-            run_evaluation(
-                config=config,
-                skill_type=args.skill,
-                skill_content=skill_content,
-                split=args.split,
-                dataset_ids=dataset_ids,
-                all_datasets=all_datasets,
-                dry_run=args.dry_run,
-                step_limit=args.step_limit,
-                timeout=args.timeout,
-                agent_name=agent_name,
-                model_name=model_name,
-                agent_type=args.agent,
-                skill_mode=skill_mode,
-                run_idx=run_idx,
-            )
+                run_evaluation(
+                    config=config,
+                    skill_type=args.skill,
+                    skill_content=skill_content,
+                    split='exec',
+                    dataset_ids=[dataset_id],
+                    all_datasets=False,
+                    dry_run=args.dry_run,
+                    step_limit=args.step_limit,
+                    timeout=args.timeout,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    agent_type=args.agent,
+                    skill_mode=skill_mode,
+                    run_idx=run_idx,
+                )
 
-            print("=" * 60)
-            print(f"Running BASELINE evaluation (no skill) for comparison (run {run_idx})")
-            print("=" * 60 + "\n")
+                print("=" * 60)
+                print(f"[Exec Dataset {dataset_id}] BASELINE (no skill) (run {run_idx})")
+                print("=" * 60 + "\n")
 
-            run_evaluation(
-                config=config,
-                skill_type=args.skill,
-                skill_content=None,  # No skill injection = baseline
-                split=args.split,
-                dataset_ids=dataset_ids,
-                all_datasets=all_datasets,
-                dry_run=args.dry_run,
-                step_limit=args.step_limit,
-                timeout=args.timeout,
-                agent_name=agent_name,
-                model_name=model_name,
-                agent_type=args.agent,
-                skill_mode=skill_mode,
-                run_idx=run_idx,
-            )
+                run_evaluation(
+                    config=config,
+                    skill_type=args.skill,
+                    skill_content=None,
+                    split='exec',
+                    dataset_ids=[dataset_id],
+                    all_datasets=False,
+                    dry_run=args.dry_run,
+                    step_limit=args.step_limit,
+                    timeout=args.timeout,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    agent_type=args.agent,
+                    skill_mode=skill_mode,
+                    run_idx=run_idx,
+                )
+
+            for category in gen_ids:
+                print("=" * 60)
+                print(f"[Gen Category {category}] WITH constitutional skill (run {run_idx})")
+                print("=" * 60 + "\n")
+
+                run_evaluation(
+                    config=config,
+                    skill_type=args.skill,
+                    skill_content=skill_content,
+                    split='gen',
+                    dataset_ids=[category],
+                    all_datasets=False,
+                    dry_run=args.dry_run,
+                    step_limit=args.step_limit,
+                    timeout=args.timeout,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    agent_type=args.agent,
+                    skill_mode=skill_mode,
+                    run_idx=run_idx,
+                )
+
+                print("=" * 60)
+                print(f"[Gen Category {category}] BASELINE (no skill) (run {run_idx})")
+                print("=" * 60 + "\n")
+
+                run_evaluation(
+                    config=config,
+                    skill_type=args.skill,
+                    skill_content=None,
+                    split='gen',
+                    dataset_ids=[category],
+                    all_datasets=False,
+                    dry_run=args.dry_run,
+                    step_limit=args.step_limit,
+                    timeout=args.timeout,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    agent_type=args.agent,
+                    skill_mode=skill_mode,
+                    run_idx=run_idx,
+                )
 
 
 if __name__ == "__main__":
