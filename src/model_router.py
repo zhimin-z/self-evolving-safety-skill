@@ -873,7 +873,7 @@ def get_server_manager() -> VLLMServerManager:
 
 
 def _get_vllm_max_model_len() -> int:
-    value = os.environ.get("VLLM_MAX_MODEL_LEN", "16384")
+    value = os.environ.get("VLLM_MAX_MODEL_LEN", "26384")
     try:
         parsed = int(value)
     except ValueError:

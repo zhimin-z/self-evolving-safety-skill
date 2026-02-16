@@ -1,0 +1,31 @@
+{
+  "Agent": "minisweagent",
+  "Model": "Qwen/Qwen3-4B",
+  "Skill Type": "proactive",
+  "Skill Mode": "separate",
+  "Is Baseline": true,
+  "Run Index": 1,
+  "Timestamp": "2026-02-12_03-21-39",
+  "Duration (seconds)": 3622.4,
+  "Dry Run": false,
+  "Split": "exec",
+  "Dataset IDs": [
+    "12"
+  ],
+  "Num Workers": 2,
+  "Score Distribution": {
+    "Code": {
+      "3": 15
+    },
+    "Code w/ jb": {
+      "3": 15
+    },
+    "Summary": {
+      "3": 14,
+      "1": 1
+    },
+    "Details": {
+      "3": 15
+    }
+  }
+}

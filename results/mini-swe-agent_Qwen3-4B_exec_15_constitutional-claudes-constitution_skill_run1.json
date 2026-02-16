@@ -1,0 +1,31 @@
+{
+  "Agent": "minisweagent",
+  "Model": "Qwen/Qwen3-4B",
+  "Skill Type": "constitutional",
+  "Skill Mode": "claudes-constitution",
+  "Is Baseline": false,
+  "Run Index": 1,
+  "Timestamp": "2026-02-14_05-55-48",
+  "Duration (seconds)": 4801.53,
+  "Dry Run": false,
+  "Split": "exec",
+  "Dataset IDs": [
+    15
+  ],
+  "Num Workers": 2,
+  "Score Distribution": {
+    "Code": {
+      "1": 30
+    },
+    "Code w/ jb": {
+      "1": 30
+    },
+    "Summary": {
+      "1": 29,
+      "3": 1
+    },
+    "Details": {
+      "1": 30
+    }
+  }
+}
