@@ -501,8 +501,7 @@ class SWEAgentWrapper(BaseAgent):
         # Lazy import SWE-agent components
         try:
             from sweagent.agent.models import get_model, ModelConfig
-            from litellm import completion
-            self._completion = completion
+            self._completion = completion_with_retry
         except ImportError as e:
             raise ImportError(f"SWE-agent dependencies not installed: {e}")
 
@@ -625,6 +624,7 @@ def build_agent(
         model_name=model_cfg.get("model_name", DEFAULT_MODEL),
         model_kwargs=model_cfg.get("model_kwargs", {}),
         cost_tracking=model_cfg.get("cost_tracking", "default"),
+        set_cache_control=model_cfg.get("set_cache_control", "auto"),
     )
 
     # Setup environment

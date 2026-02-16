@@ -50,6 +50,7 @@ CLOSED_SOURCE_PATTERNS = [
     "openai/",
     "cohere/",
     "google/gemini",  # Gemini is closed, but google/gemma is open
+    "deepseek/",  # OpenRouter namespace (vs deepseek-ai/ for HuggingFace local)
 ]
 
 
@@ -72,8 +73,8 @@ def _is_local_model(model_name: str) -> bool:
         if normalized.startswith(pattern.lower()):
             return True
 
-    # Default: try local if not obviously closed-source
-    return True
+    # Default: route to OpenRouter for unknown models (safer than failing vLLM startup)
+    return False
 
 def _strip_model_prefixes_preserve_case(model_name: str) -> str:
     lower = model_name.lower()
@@ -104,15 +105,6 @@ def _estimate_message_chars(messages: List[Dict[str, Any]]) -> Dict[str, int]:
         if len(content) > max_single:
             max_single = len(content)
     return {"total": total, "max_single": max_single, "count": len(messages or [])}
-
-
-    # Check if matches local patterns
-    for pattern in LOCAL_MODEL_PATTERNS:
-        if normalized.startswith(pattern.lower()):
-            return True
-
-    # Default: try local if not obviously closed-source
-    return False
 
 
 def _get_cuda_visible_devices() -> str:
@@ -1162,13 +1154,19 @@ class RoutedLitellmModel:
 
     This class provides the same interface as minisweagent's LitellmModel but
     routes requests to vLLM when available, falling back to OpenRouter.
+    Supports prompt caching via cache_control for Anthropic models (explicit
+    breakpoints) and DeepSeek/others on OpenRouter (automatic, no-op).
     """
+
+    # Models that benefit from explicit cache_control breakpoints
+    _CACHE_CONTROL_MODELS = ["anthropic", "claude", "sonnet", "opus", "haiku"]
 
     def __init__(
         self,
         model_name: str,
         model_kwargs: Optional[Dict[str, Any]] = None,
         cost_tracking: str = "default",
+        set_cache_control: Optional[str] = "auto",
         **kwargs,
     ):
         """
@@ -1178,6 +1176,8 @@ class RoutedLitellmModel:
             model_name: Model name (e.g., "qwen/qwen3-coder-next")
             model_kwargs: Additional model parameters
             cost_tracking: Cost tracking mode ("default" or "ignore_errors")
+            set_cache_control: Cache control mode. "auto" enables for Anthropic
+                models, "default_end" always enables, None disables.
         """
         self.model_name = model_name
         self.model_kwargs = model_kwargs or {}
@@ -1186,9 +1186,30 @@ class RoutedLitellmModel:
         self.n_calls = 0
         self._router = get_router()
 
+        # Resolve cache_control setting
+        if set_cache_control == "auto":
+            name_lower = model_name.lower()
+            if any(s in name_lower for s in self._CACHE_CONTROL_MODELS):
+                self._cache_control = "default_end"
+            else:
+                self._cache_control = None
+        else:
+            self._cache_control = set_cache_control
+
         # Check routing target at init time for logging
         target, formatted = self._router.get_routing_target(model_name)
-        logger.info(f"RoutedLitellmModel initialized: {model_name} -> {target} ({formatted})")
+        cache_status = f", cache_control={self._cache_control}" if self._cache_control else ""
+        logger.info(f"RoutedLitellmModel initialized: {model_name} -> {target} ({formatted}{cache_status})")
+
+    def _apply_cache_control(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Apply cache_control breakpoints to messages for prompt caching."""
+        if not self._cache_control:
+            return messages
+        try:
+            from minisweagent.models.utils.cache_control import set_cache_control
+            return set_cache_control(messages, mode=self._cache_control)
+        except ImportError:
+            return messages
 
     def query(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
         """
@@ -1204,10 +1225,23 @@ class RoutedLitellmModel:
         # Merge kwargs with default model_kwargs
         merged_kwargs = {**self.model_kwargs, **kwargs}
 
+        # Preserve message structure (don't strip cache_control/content lists)
+        formatted_messages = []
+        for m in messages:
+            msg = {"role": m["role"]}
+            if "content" in m:
+                msg["content"] = m["content"]
+            if "cache_control" in m:
+                msg["cache_control"] = m["cache_control"]
+            formatted_messages.append(msg)
+
+        # Apply cache_control breakpoints for supported models
+        formatted_messages = self._apply_cache_control(formatted_messages)
+
         # Route and execute
         response = self._router.completion(
             model=self.model_name,
-            messages=[{"role": m["role"], "content": m["content"]} for m in messages],
+            messages=formatted_messages,
             **merged_kwargs,
         )
 
@@ -1271,6 +1305,7 @@ if __name__ == "__main__":
         ("anthropic/claude-haiku-4.5", "Should route to OpenRouter (closed-source)"),
         ("openrouter/anthropic/claude-sonnet-4.5", "Should route to OpenRouter (explicit)"),
         ("deepseek-ai/DeepSeek-Coder-V2", "Should route to vLLM (local)"),
+        ("deepseek/deepseek-v3.2", "Should route to OpenRouter (closed-source, OpenRouter namespace)"),
     ]
 
     for model, expected in test_models:
