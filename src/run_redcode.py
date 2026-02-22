@@ -104,6 +104,16 @@ def _check_skill_checkpoint(output_dir, skill_type, split=None, dataset_ids=None
     return None
 
 
+def _result_exists(result_base, split, dataset_ids, agent_name, model_name,
+                    skill_type, run_idx, is_baseline, skill_mode, agent_type):
+    """Silently check if a final result JSON already exists."""
+    result_filename = generate_result_filename(
+        split, dataset_ids, agent_name, model_name, skill_type, run_idx,
+        is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
+    )
+    return os.path.exists(os.path.join(result_base, result_filename))
+
+
 def _check_result_checkpoint(result_base, split, dataset_ids, agent_name, model_name,
                               skill_type, run_idx, is_baseline, skill_mode, agent_type):
     """Check if a final result JSON already exists for this evaluation.
@@ -121,6 +131,26 @@ def _check_result_checkpoint(result_base, split, dataset_ids, agent_name, model_
         print(f"  [Checkpoint] Skipping evaluation (reusing cached result)")
         return True
     return False
+
+
+def _all_results_exist(result_base, exec_ids, gen_ids, agent_name, model_name,
+                        skill_type, run_idx, skill_mode, agent_type):
+    """Check if ALL per-dataset result files (both skill and baseline) exist for a run.
+
+    Returns True if every expected result file exists, meaning the entire run
+    (including training/skill generation) can be skipped.
+    """
+    for did in exec_ids:
+        for is_baseline in (False, True):
+            if not _result_exists(result_base, "exec", did, agent_name, model_name,
+                                  skill_type, run_idx, is_baseline, skill_mode, agent_type):
+                return False
+    for did in gen_ids:
+        for is_baseline in (False, True):
+            if not _result_exists(result_base, "gen", did, agent_name, model_name,
+                                  skill_type, run_idx, is_baseline, skill_mode, agent_type):
+                return False
+    return True
 
 
 # ============================================================================
@@ -201,6 +231,12 @@ def run_aggregate_experiment(
         print(f"\n{'='*60}")
         print(f"[Run {run_idx}/{n_runs}]")
         print(f"{'='*60}")
+
+        # Early skip: if ALL per-dataset results (skill + baseline) already exist, skip entire run
+        if _all_results_exist(result_base, exec_ids, gen_ids, agent_name, model_name,
+                              skill_type, run_idx, skill_mode="aggregate", agent_type=agent_type):
+            print(f"  [Checkpoint] All results exist for run {run_idx}, skipping entire run (incl. training)")
+            continue
 
         # Split cases: 50% train, 50% test (per-dataset split, no leakage)
         seed = run_idx  # Reproducible but different each run
@@ -500,6 +536,15 @@ def run_separate_experiment(
             iteration += 1
             print(f"\n{'='*60}")
             print(f"[{iteration}/{total_iterations}] Dataset: {dataset_id}, Run: {local_run_idx}/{n_runs}")
+
+            # Early skip: if both skill and baseline results exist, skip entire iteration
+            skill_done = _result_exists(result_base, dataset_split, dataset_id, agent_name, model_name,
+                                        skill_type, local_run_idx, is_baseline=False, skill_mode="separate", agent_type=agent_type)
+            baseline_done = _result_exists(result_base, dataset_split, dataset_id, agent_name, model_name,
+                                           skill_type, local_run_idx, is_baseline=True, skill_mode="separate", agent_type=agent_type)
+            if skill_done and baseline_done:
+                print(f"  [Checkpoint] All results exist for dataset {dataset_id} run {local_run_idx}, skipping entire iteration (incl. training)")
+                continue
             print(f"{'='*60}")
 
             print(f"  Loaded {len(cases)} cases")
@@ -890,6 +935,12 @@ Output:
                 print(f"[Run {run_idx}/{args.n_runs}]")
                 print(f"{'='*60}")
 
+            # Early skip: if ALL per-dataset results (skill + baseline) already exist, skip entire run
+            if _all_results_exist(result_base, exec_ids, gen_ids, agent_name, model_name,
+                                  args.skill, run_idx, skill_mode=skill_mode, agent_type=args.agent):
+                print(f"  [Checkpoint] All results exist for run {run_idx}, skipping entire run (incl. skill generation)")
+                continue
+
             cached_skill = _check_skill_checkpoint(output_dir, args.skill, run_idx=run_idx, skill_mode=skill_mode, model_name=get_model_full_name(config), agent_type=args.agent)
             if cached_skill is not None:
                 skill_content = cached_skill
@@ -987,9 +1038,9 @@ Output:
                         agent_name=agent_name,
                         model_name=model_name,
                         agent_type=args.agent,
-                    skill_mode=skill_mode,
-                    run_idx=run_idx,
-                )
+                        skill_mode=skill_mode,
+                        run_idx=run_idx,
+                    )
 
 
 if __name__ == "__main__":
