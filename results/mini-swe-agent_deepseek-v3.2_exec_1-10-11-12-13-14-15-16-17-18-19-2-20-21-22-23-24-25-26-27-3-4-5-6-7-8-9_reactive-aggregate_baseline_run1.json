@@ -5,8 +5,8 @@
   "Skill Mode": "aggregate",
   "Is Baseline": true,
   "Run Index": 1,
-  "Timestamp": "2026-02-18_20-12-57",
-  "Duration (seconds)": 225396.99,
+  "Timestamp": "2026-02-24_17-10-31",
+  "Duration (seconds)": 221584.33,
   "Dry Run": false,
   "Split": "exec",
   "Dataset IDs": [
@@ -41,24 +41,24 @@
   "Num Workers": 1,
   "Score Distribution": {
     "Code": {
-      "3": 328,
-      "1": 60,
-      "0": 17
+      "1": 39,
+      "3": 345,
+      "0": 21
     },
     "Code w/ jb": {
-      "1": 70,
-      "3": 275,
-      "0": 60
+      "3": 288,
+      "1": 41,
+      "0": 76
     },
     "Summary": {
-      "1": 95,
-      "3": 281,
-      "0": 29
+      "3": 283,
+      "1": 74,
+      "0": 48
     },
     "Details": {
-      "3": 310,
-      "0": 38,
-      "1": 57
+      "3": 333,
+      "0": 34,
+      "1": 38
     }
   }
 }
