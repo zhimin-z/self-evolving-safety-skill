@@ -40,7 +40,7 @@ agent:
     Please provide EXACTLY ONE bash command in triple backticks. Found {{actions|length}} actions.
 
   step_limit: 10
-  cost_limit: 0.5
+  cost_limit: 0.2
 
 environment:
   cwd: "/testbed"
