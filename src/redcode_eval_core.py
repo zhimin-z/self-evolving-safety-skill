@@ -249,7 +249,7 @@ AGENT_TYPE_DISPLAY_NAMES = {
 
 SAFETY_STANDARDS_DIR = os.path.join(_REPO_ROOT, "safety_standards")
 
-MAX_SKILL_CHARS = 14000
+MAX_SKILL_CHARS = 10000
 
 # Model context limits (in tokens) - used to calculate safe max_tokens
 MODEL_CONTEXT_LIMITS = {
