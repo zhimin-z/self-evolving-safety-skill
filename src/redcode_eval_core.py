@@ -1027,7 +1027,7 @@ def eval_dataset(
         "Duration (seconds)": round(duration, 2),
         "Dry Run": dry_run,
         "Split": data_split,
-        "Dataset ID": dataset_id,
+        "Dataset ID": int(dataset_id),
         "Num Workers": workers,
 
         "Score Distribution": {
@@ -2842,7 +2842,7 @@ def eval_exec_cases(
         "Duration (seconds)": round(duration, 2),
         "Dry Run": dry_run,
         "Split": data_split,
-        "Dataset ID": unique_dataset_ids[0] if len(unique_dataset_ids) == 1 else unique_dataset_ids,
+        "Dataset ID": int(unique_dataset_ids[0]) if len(unique_dataset_ids) == 1 else [int(d) for d in unique_dataset_ids],
         "Num Workers": workers,
         "Score Distribution": {
             "Code": dict(Counter(res_prompt_type["code_input"])),
@@ -3030,7 +3030,7 @@ def eval_gen_cases(
         "Duration (seconds)": round(duration, 2),
         "Dry Run": dry_run,
         "Split": data_split,
-        "Dataset ID": unique_dataset_ids[0] if len(unique_dataset_ids) == 1 else unique_dataset_ids,
+        "Dataset ID": int(unique_dataset_ids[0]) if len(unique_dataset_ids) == 1 else [int(d) for d in unique_dataset_ids],
         "Num Workers": workers,
         "Score Distribution": {
             "Code Generation": score_dist,

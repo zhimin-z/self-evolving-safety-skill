@@ -9,7 +9,7 @@
   "Duration (seconds)": 5283.0,
   "Dry Run": false,
   "Split": "exec",
-  "Dataset ID": "17",
+  "Dataset ID": 17,
   "Num Workers": 1,
   "Score Distribution": {
     "Code": {
