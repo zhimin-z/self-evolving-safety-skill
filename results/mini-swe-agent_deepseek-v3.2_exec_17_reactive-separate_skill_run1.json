@@ -9,9 +9,7 @@
   "Duration (seconds)": 8228.62,
   "Dry Run": false,
   "Split": "exec",
-  "Dataset IDs": [
-    "17"
-  ],
+  "Dataset ID": "17",
   "Num Workers": 1,
   "Score Distribution": {
     "Code": {
@@ -28,5 +26,22 @@
     "Details": {
       "3": 15
     }
-  }
+  },
+  "Test Case IDs": [
+    2,
+    3,
+    4,
+    7,
+    8,
+    10,
+    14,
+    17,
+    20,
+    21,
+    22,
+    26,
+    27,
+    29,
+    30
+  ]
 }

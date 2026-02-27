@@ -5,7 +5,7 @@ os.environ.setdefault("VLLM_DISABLE_CUDNN_CHECK", "1")
 RedCode evaluation script with optional skill generation.
 
 The --mode flag is the variant selector for all skill types:
-- reactive/proactive: "aggregate" or "separate"
+- reactive/proactive/fusion: "aggregate" or "separate"
 - constitutional: safety standard filenames or "all" (default, expands to all standards)
 
 Usage:
@@ -25,6 +25,10 @@ Usage:
     python evaluation/run_redcode.py --skill constitutional --split exec --dataset_ids all
     python evaluation/run_redcode.py --skill constitutional --mode owaspai_general_controls.md --split exec --dataset_ids all
     python evaluation/run_redcode.py --skill constitutional --mode nist_ai_rmf_playbook.json owaspai_general_controls.md --split exec --dataset_ids all
+
+    # Fusion (reuses existing base skill + constitutional skill files, fuses and evaluates)
+    python evaluation/run_redcode.py --skill fusion --fusion_base reactive --mode aggregate --split exec --dataset_ids all
+    python evaluation/run_redcode.py --skill fusion --fusion_base proactive --mode separate --fusion_std owaspai_general_controls.md --split exec --dataset_ids 1 2 3
 
     # Dry run
     python evaluation/run_redcode.py --split exec --dataset_ids 4 --dry_run
@@ -73,8 +77,10 @@ from redcode_eval_core import (
     generate_result_filename,
     generate_skill_from_cases,
     inject_skill_into_config,
+    save_skill,
+    # Fusion
+    fuse_skills,
     # Evaluation
-    generate_result_filename,
     eval_exec_cases,
     eval_gen_cases,
     generate_skill,
@@ -119,8 +125,8 @@ def _check_result_checkpoint(result_base, split, dataset_ids, agent_name, model_
                               skill_type, run_idx, is_baseline, skill_mode, agent_type):
     """Check if a final result JSON already exists for this evaluation.
 
-    Returns True if the result file exists and the evaluation should be skipped.
-    This avoids expensive re-evaluation of completed runs on resume.
+    Returns (True, filename) if the result file exists and the evaluation
+    should be skipped, or (False, filename) otherwise.
     """
     result_filename = generate_result_filename(
         split, dataset_ids, agent_name, model_name, skill_type, run_idx,
@@ -128,10 +134,8 @@ def _check_result_checkpoint(result_base, split, dataset_ids, agent_name, model_
     )
     result_path = os.path.join(result_base, result_filename)
     if os.path.exists(result_path):
-        print(f"  [Checkpoint] Result already exists: {result_filename}")
-        print(f"  [Checkpoint] Skipping evaluation (reusing cached result)")
-        return True
-    return False
+        return True, result_filename
+    return False, result_filename
 
 
 def _all_results_exist(result_base, exec_ids, gen_ids, agent_name, model_name,
@@ -369,7 +373,7 @@ def run_aggregate_experiment(
             ds_cases = exec_by_dataset[dataset_id]
 
             if not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
-                                            skill_type, run_idx, is_baseline=False, skill_mode="aggregate", agent_type=agent_type):
+                                            skill_type, run_idx, is_baseline=False, skill_mode="aggregate", agent_type=agent_type)[0]:
                 print(f"\n  [A] Evaluating WITH {skill_type} skill on exec dataset {dataset_id} ({len(ds_cases)} test cases)...")
                 eval_exec_cases(
                     cases=ds_cases,
@@ -389,7 +393,7 @@ def run_aggregate_experiment(
                 )
 
             if not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
-                                            skill_type, run_idx, is_baseline=True, skill_mode="aggregate", agent_type=agent_type):
+                                            skill_type, run_idx, is_baseline=True, skill_mode="aggregate", agent_type=agent_type)[0]:
                 print(f"\n  [B] Evaluating BASELINE on exec dataset {dataset_id} ({len(ds_cases)} test cases)...")
                 eval_exec_cases(
                     cases=ds_cases,
@@ -412,7 +416,7 @@ def run_aggregate_experiment(
             ds_cases = gen_by_dataset[dataset_id]
 
             if not _check_result_checkpoint(result_base, "gen", dataset_id, agent_name, model_name,
-                                            skill_type, run_idx, is_baseline=False, skill_mode="aggregate", agent_type=agent_type):
+                                            skill_type, run_idx, is_baseline=False, skill_mode="aggregate", agent_type=agent_type)[0]:
                 print(f"\n  [A] Evaluating WITH {skill_type} skill on gen dataset {dataset_id} ({len(ds_cases)} test cases)...")
                 eval_gen_cases(
                     cases=ds_cases,
@@ -432,7 +436,7 @@ def run_aggregate_experiment(
                 )
 
             if not _check_result_checkpoint(result_base, "gen", dataset_id, agent_name, model_name,
-                                            skill_type, run_idx, is_baseline=True, skill_mode="aggregate", agent_type=agent_type):
+                                            skill_type, run_idx, is_baseline=True, skill_mode="aggregate", agent_type=agent_type)[0]:
                 print(f"\n  [B] Evaluating BASELINE on gen dataset {dataset_id} ({len(ds_cases)} test cases)...")
                 eval_gen_cases(
                     cases=ds_cases,
@@ -701,7 +705,7 @@ def run_separate_experiment(
             # PART A: Evaluate WITH skill
             # =====================================================================
             if exec_test and not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
-                                                          skill_type, local_run_idx, is_baseline=False, skill_mode="separate", agent_type=agent_type):
+                                                          skill_type, local_run_idx, is_baseline=False, skill_mode="separate", agent_type=agent_type)[0]:
                 print(f"\n  [A] Evaluating WITH {skill_type} skill on {len(exec_test)} exec test cases...")
                 eval_exec_cases(
                     cases=exec_test,
@@ -721,7 +725,7 @@ def run_separate_experiment(
                 )
 
             if gen_test and not _check_result_checkpoint(result_base, "gen", dataset_id, agent_name, model_name,
-                                                         skill_type, local_run_idx, is_baseline=False, skill_mode="separate", agent_type=agent_type):
+                                                         skill_type, local_run_idx, is_baseline=False, skill_mode="separate", agent_type=agent_type)[0]:
                 print(f"\n  [A] Evaluating WITH {skill_type} skill on {len(gen_test)} gen test cases...")
                 eval_gen_cases(
                     cases=gen_test,
@@ -744,7 +748,7 @@ def run_separate_experiment(
             # PART B: Evaluate baseline (no skill) on same test cases for comparison
             # =====================================================================
             if exec_test and not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
-                                                          skill_type, local_run_idx, is_baseline=True, skill_mode="separate", agent_type=agent_type):
+                                                          skill_type, local_run_idx, is_baseline=True, skill_mode="separate", agent_type=agent_type)[0]:
                 print(f"\n  [B] Evaluating BASELINE (no skill) on {len(exec_test)} exec test cases...")
                 eval_exec_cases(
                     cases=exec_test,
@@ -764,7 +768,7 @@ def run_separate_experiment(
                 )
 
             if gen_test and not _check_result_checkpoint(result_base, "gen", dataset_id, agent_name, model_name,
-                                                         skill_type, local_run_idx, is_baseline=True, skill_mode="separate", agent_type=agent_type):
+                                                         skill_type, local_run_idx, is_baseline=True, skill_mode="separate", agent_type=agent_type)[0]:
                 print(f"\n  [B] Evaluating BASELINE (no skill) on {len(gen_test)} gen test cases...")
                 eval_gen_cases(
                     cases=gen_test,
@@ -797,6 +801,414 @@ def run_separate_experiment(
 
 
 # ============================================================================
+# Fusion Experiment (reuses existing skill files, fuses, evaluates)
+# ============================================================================
+
+def _fusion_skill_mode(fusion_base: str, base_mode: str, fusion_std: list) -> str:
+    """Build a compound skill_mode string for fusion filenames.
+
+    Format: {fusion_base}.{aggregate|separate}.{std1-std2-...}
+    Uses '.' to separate structural parts from the '-' used within standard names.
+
+    Example: "reactive.aggregate.owaspai_general_controls-nist_ai_rmf_playbook"
+    """
+    std_suffix = _skill_mode_suffix(fusion_std)
+    return f"{fusion_base}.{base_mode}.{std_suffix}"
+
+
+def _locate_skill_file(output_dir: str, skill_type: str, split: str = None,
+                       dataset_ids=None, run_idx: int = None, skill_mode=None,
+                       model_name: str = "", agent_type: str = "") -> str:
+    """Locate an existing skill .md file. Returns content or exits on failure."""
+    filename = generate_skill_filename(
+        skill_type, split, dataset_ids, run_idx,
+        skill_mode=skill_mode, model_name=model_name, agent_type=agent_type
+    )
+    path = os.path.join(output_dir, filename)
+    if not os.path.exists(path):
+        print(f"  ERROR: Required skill file not found: {filename}")
+        print(f"  Path: {path}")
+        print(f"  Run the '{skill_type}' experiment first to generate this skill.")
+        sys.exit(1)
+    with open(path, "r") as f:
+        content = f.read()
+    if not content.strip():
+        print(f"  ERROR: Skill file is empty: {filename}")
+        sys.exit(1)
+    print(f"  Loaded skill: {filename} ({len(content)} chars)")
+    return content
+
+
+def run_fusion_experiment(
+    fusion_base: str,
+    fusion_std: list,
+    base_mode: str,
+    split: str,
+    dataset_ids: list,
+    all_datasets: bool,
+    n_runs: int,
+    config: dict,
+    step_limit: int,
+    timeout: int,
+    agent_name: str,
+    model_name: str,
+    dry_run: bool,
+    agent_type: str = "mini",
+):
+    """Fusion experiment: locate existing skill files, fuse, and evaluate.
+
+    No re-training. Steps for each run:
+    1. Locate the existing base skill .md (reactive/proactive, aggregate/separate)
+    2. Locate the existing constitutional skill .md
+    3. Fuse them into a single skill via LLM (within MAX_SKILL_CHARS)
+    4. Reconstruct the same test split (deterministic seed) as the base experiment
+    5. Evaluate the fused skill on those test cases
+    """
+    skill_type = "fusion"
+    fusion_mode = _fusion_skill_mode(fusion_base, base_mode, fusion_std)
+
+    benchmark_dir = os.path.join(REPO_ROOT, "external/RedCode/dataset")
+    output_dir = os.path.join(REPO_ROOT, "skills")
+    result_base = os.path.join(REPO_ROOT, "results")
+    os.makedirs(result_base, exist_ok=True)
+
+    exec_ids = get_exec_dataset_ids(dataset_ids, all_datasets) if split in ('exec', 'all') else []
+    gen_ids = get_gen_dataset_ids(dataset_ids, all_datasets) if split in ('gen', 'all') else []
+    all_dataset_ids = exec_ids + gen_ids
+
+    if not all_dataset_ids:
+        print("Error: No valid dataset IDs to evaluate")
+        sys.exit(1)
+
+    print("=" * 60)
+    print(f"Fusion experiment: {fusion_base} + constitutional -> fused skill")
+    print(f"Base mode: {base_mode}, Split: {split}, Datasets: {all_dataset_ids}")
+    print(f"Constitutional standards: {fusion_std}")
+    print("=" * 60)
+
+    full_model = get_model_full_name(config)
+
+    # Load constitutional skill once (shared across all runs)
+    print(f"\n[1] Locating constitutional skill...")
+    const_skill_mode = fusion_std  # list of filenames
+    constitutional_content = _locate_skill_file(
+        output_dir, "constitutional",
+        skill_mode=const_skill_mode, model_name=full_model, agent_type=agent_type
+    )
+
+    # Load all cases (needed to reconstruct test splits)
+    print(f"\nLoading RedCode benchmark cases...")
+    all_cases = load_redcode_datasets_for_generation(benchmark_dir, split, all_dataset_ids)
+    if not all_cases:
+        print("Error: No cases found")
+        sys.exit(1)
+    print(f"Total cases loaded: {len(all_cases)}")
+
+    if base_mode == "aggregate":
+        _run_fusion_aggregate(
+            fusion_base=fusion_base, fusion_std=fusion_std, fusion_mode=fusion_mode,
+            all_cases=all_cases, all_dataset_ids=all_dataset_ids,
+            exec_ids=exec_ids, gen_ids=gen_ids,
+            constitutional_content=constitutional_content,
+            split=split, n_runs=n_runs,
+            config=config, step_limit=step_limit, timeout=timeout,
+            agent_name=agent_name, model_name=model_name,
+            output_dir=output_dir, result_base=result_base,
+            dry_run=dry_run, agent_type=agent_type,
+        )
+    else:  # separate
+        _run_fusion_separate(
+            fusion_base=fusion_base, fusion_std=fusion_std, fusion_mode=fusion_mode,
+            exec_ids=exec_ids, gen_ids=gen_ids,
+            constitutional_content=constitutional_content,
+            split=split, n_runs=n_runs,
+            config=config, step_limit=step_limit, timeout=timeout,
+            agent_name=agent_name, model_name=model_name,
+            benchmark_dir=benchmark_dir, output_dir=output_dir, result_base=result_base,
+            dry_run=dry_run, agent_type=agent_type,
+        )
+
+
+def _run_fusion_aggregate(
+    fusion_base, fusion_std, fusion_mode,
+    all_cases, all_dataset_ids, exec_ids, gen_ids,
+    constitutional_content, split, n_runs,
+    config, step_limit, timeout,
+    agent_name, model_name, output_dir, result_base,
+    dry_run, agent_type,
+):
+    """Fusion aggregate: one skill from pooled datasets, evaluate per-dataset."""
+    skill_type = "fusion"
+    full_model = get_model_full_name(config)
+
+    for run_idx in range(1, n_runs + 1):
+        print(f"\n{'='*60}")
+        print(f"[Run {run_idx}/{n_runs}]")
+        print(f"{'='*60}")
+
+        if _all_results_exist(result_base, exec_ids, gen_ids, agent_name, model_name,
+                              skill_type, run_idx, skill_mode=fusion_mode, agent_type=agent_type):
+            print(f"  [Checkpoint] All results exist for run {run_idx}, skipping")
+            continue
+
+        # Check for cached fused skill
+        cached_skill = _check_skill_checkpoint(
+            output_dir, skill_type, split, all_dataset_ids,
+            run_idx, skill_mode=fusion_mode, model_name=model_name, agent_type=agent_type
+        )
+
+        if cached_skill is not None:
+            fused_content = cached_skill
+        else:
+            # Locate base skill (aggregate: one skill for all datasets)
+            print(f"\n[2] Locating base {fusion_base} skill (aggregate)...")
+            base_content = _locate_skill_file(
+                output_dir, fusion_base, split, all_dataset_ids,
+                run_idx, skill_mode="aggregate", model_name=full_model, agent_type=agent_type
+            )
+
+            # Fuse
+            print(f"\n[3] Fusing {fusion_base} + constitutional skills...")
+            fused_content = fuse_skills(base_content, constitutional_content, fusion_base, model=full_model)
+            if not fused_content:
+                print("  ERROR: Fusion failed")
+                sys.exit(1)
+
+            # Save fused skill
+            save_skill(fused_content, skill_type, output_dir, split, all_dataset_ids,
+                       run_idx, skill_mode=fusion_mode, model_name=model_name, agent_type=agent_type)
+
+        # Reconstruct test split (same seed as aggregate experiment)
+        seed = run_idx
+        _, test_cases = split_cases_by_dataset(all_cases, train_ratio=0.5, seed=seed)
+        print(f"  Reconstructed test split: {len(test_cases)} test cases (seed={seed})")
+
+        # Inject and evaluate
+        run_config = copy.deepcopy(config)
+        run_config = inject_skill_into_config(run_config, fused_content, skill_type)
+
+        def create_container():
+            return Container("redcode")
+
+        from collections import defaultdict
+        exec_by_dataset = defaultdict(list)
+        for c in [c for c in test_cases if c["split"] == "exec"]:
+            exec_by_dataset[c["dataset_id"]].append(c)
+        gen_by_dataset = defaultdict(list)
+        for c in [c for c in test_cases if c["split"] == "gen"]:
+            gen_by_dataset[c["dataset_id"]].append(c)
+
+        for dataset_id in sorted(exec_by_dataset.keys()):
+            ds_cases = exec_by_dataset[dataset_id]
+
+            if not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
+                                            skill_type, run_idx, is_baseline=False, skill_mode=fusion_mode, agent_type=agent_type)[0]:
+                print(f"\n  [A] Evaluating WITH fusion skill on exec dataset {dataset_id} ({len(ds_cases)} test cases)...")
+                eval_exec_cases(
+                    cases=ds_cases, config=run_config,
+                    container_factory=create_container,
+                    step_limit=step_limit, timeout=timeout,
+                    result_base=result_base, agent_name=agent_name,
+                    model_name=model_name, skill_type=skill_type,
+                    run_idx=run_idx, dry_run=dry_run, agent_type=agent_type,
+                    is_baseline=False, skill_mode=fusion_mode,
+                )
+
+            if not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
+                                            skill_type, run_idx, is_baseline=True, skill_mode=fusion_mode, agent_type=agent_type)[0]:
+                print(f"\n  [B] Evaluating BASELINE on exec dataset {dataset_id} ({len(ds_cases)} test cases)...")
+                eval_exec_cases(
+                    cases=ds_cases, config=config,
+                    container_factory=create_container,
+                    step_limit=step_limit, timeout=timeout,
+                    result_base=result_base, agent_name=agent_name,
+                    model_name=model_name, skill_type=skill_type,
+                    run_idx=run_idx, dry_run=dry_run, agent_type=agent_type,
+                    is_baseline=True, skill_mode=fusion_mode,
+                )
+
+        for dataset_id in sorted(gen_by_dataset.keys()):
+            ds_cases = gen_by_dataset[dataset_id]
+
+            if not _check_result_checkpoint(result_base, "gen", dataset_id, agent_name, model_name,
+                                            skill_type, run_idx, is_baseline=False, skill_mode=fusion_mode, agent_type=agent_type)[0]:
+                print(f"\n  [A] Evaluating WITH fusion skill on gen dataset {dataset_id} ({len(ds_cases)} test cases)...")
+                eval_gen_cases(
+                    cases=ds_cases, config=run_config,
+                    container_factory=create_container,
+                    step_limit=step_limit, timeout=timeout,
+                    result_base=result_base, agent_name=agent_name,
+                    model_name=model_name, skill_type=skill_type,
+                    run_idx=run_idx, dry_run=dry_run, agent_type=agent_type,
+                    is_baseline=False, skill_mode=fusion_mode,
+                )
+
+            if not _check_result_checkpoint(result_base, "gen", dataset_id, agent_name, model_name,
+                                            skill_type, run_idx, is_baseline=True, skill_mode=fusion_mode, agent_type=agent_type)[0]:
+                print(f"\n  [B] Evaluating BASELINE on gen dataset {dataset_id} ({len(ds_cases)} test cases)...")
+                eval_gen_cases(
+                    cases=ds_cases, config=config,
+                    container_factory=create_container,
+                    step_limit=step_limit, timeout=timeout,
+                    result_base=result_base, agent_name=agent_name,
+                    model_name=model_name, skill_type=skill_type,
+                    run_idx=run_idx, dry_run=dry_run, agent_type=agent_type,
+                    is_baseline=True, skill_mode=fusion_mode,
+                )
+
+        print(f"\n[Run {run_idx}/{n_runs}] Complete!")
+
+    print(f"\n{'='*60}")
+    print(f"All {n_runs} fusion runs complete!")
+    print(f"{'='*60}\n")
+
+
+def _run_fusion_separate(
+    fusion_base, fusion_std, fusion_mode,
+    exec_ids, gen_ids,
+    constitutional_content, split, n_runs,
+    config, step_limit, timeout,
+    agent_name, model_name,
+    benchmark_dir, output_dir, result_base,
+    dry_run, agent_type,
+):
+    """Fusion separate: per-dataset skill files, fuse each, evaluate per-dataset."""
+    skill_type = "fusion"
+    full_model = get_model_full_name(config)
+
+    all_dataset_ids = exec_ids + gen_ids
+    start_time = time.time()
+    total_iterations = len(all_dataset_ids) * n_runs
+    iteration = 0
+
+    for dataset_id in all_dataset_ids:
+        is_exec = dataset_id in exec_ids
+        dataset_split = "exec" if is_exec else "gen"
+
+        cases = load_redcode_datasets_for_generation(benchmark_dir, dataset_split, [dataset_id])
+        if not cases:
+            print(f"  Warning: No cases found for dataset {dataset_id}, skipping...")
+            continue
+
+        for local_run_idx in range(1, n_runs + 1):
+            iteration += 1
+            print(f"\n{'='*60}")
+            print(f"[{iteration}/{total_iterations}] Dataset: {dataset_id}, Run: {local_run_idx}/{n_runs}")
+
+            skill_done = _result_exists(result_base, dataset_split, dataset_id, agent_name, model_name,
+                                        skill_type, local_run_idx, is_baseline=False, skill_mode=fusion_mode, agent_type=agent_type)
+            baseline_done = _result_exists(result_base, dataset_split, dataset_id, agent_name, model_name,
+                                           skill_type, local_run_idx, is_baseline=True, skill_mode=fusion_mode, agent_type=agent_type)
+            if skill_done and baseline_done:
+                print(f"  [Checkpoint] All results exist, skipping")
+                continue
+            print(f"{'='*60}")
+
+            # Check for cached fused skill
+            cached_skill = _check_skill_checkpoint(
+                output_dir, skill_type, dataset_split, [dataset_id],
+                local_run_idx, skill_mode=fusion_mode, model_name=model_name, agent_type=agent_type
+            )
+
+            if cached_skill is not None:
+                fused_content = cached_skill
+            else:
+                # Locate per-dataset base skill
+                print(f"  Locating base {fusion_base} skill (separate, dataset {dataset_id})...")
+                base_content = _locate_skill_file(
+                    output_dir, fusion_base, dataset_split, [dataset_id],
+                    local_run_idx, skill_mode="separate", model_name=full_model, agent_type=agent_type
+                )
+
+                # Fuse
+                print(f"  Fusing {fusion_base} + constitutional skills...")
+                fused_content = fuse_skills(base_content, constitutional_content, fusion_base, model=full_model)
+                if not fused_content:
+                    print("  ERROR: Fusion failed, skipping this dataset/run")
+                    continue
+
+                # Save fused skill
+                save_skill(fused_content, skill_type, output_dir, dataset_split, [dataset_id],
+                           local_run_idx, skill_mode=fusion_mode, model_name=model_name, agent_type=agent_type)
+
+            # Reconstruct test split (same seed as separate experiment)
+            dataset_hash = int(hashlib.md5(str(dataset_id).encode()).hexdigest(), 16)
+            seed = (dataset_hash + local_run_idx) % (2**31)
+            _, test_cases = split_cases_by_dataset(cases, train_ratio=0.5, seed=seed)
+            print(f"  Reconstructed test split: {len(test_cases)} test cases (seed={seed})")
+
+            # Inject and evaluate
+            dataset_config = copy.deepcopy(config)
+            dataset_config = inject_skill_into_config(dataset_config, fused_content, skill_type)
+
+            def create_container():
+                return Container("redcode")
+
+            exec_test = [c for c in test_cases if c["split"] == "exec"]
+            gen_test = [c for c in test_cases if c["split"] == "gen"]
+
+            if exec_test and not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
+                                                          skill_type, local_run_idx, is_baseline=False, skill_mode=fusion_mode, agent_type=agent_type)[0]:
+                print(f"\n  [A] Evaluating WITH fusion skill on {len(exec_test)} exec test cases...")
+                eval_exec_cases(
+                    cases=exec_test, config=dataset_config,
+                    container_factory=create_container,
+                    step_limit=step_limit, timeout=timeout,
+                    result_base=result_base, agent_name=agent_name,
+                    model_name=model_name, skill_type=skill_type,
+                    run_idx=local_run_idx, dry_run=dry_run, agent_type=agent_type,
+                    is_baseline=False, skill_mode=fusion_mode,
+                )
+
+            if gen_test and not _check_result_checkpoint(result_base, "gen", dataset_id, agent_name, model_name,
+                                                         skill_type, local_run_idx, is_baseline=False, skill_mode=fusion_mode, agent_type=agent_type)[0]:
+                print(f"\n  [A] Evaluating WITH fusion skill on {len(gen_test)} gen test cases...")
+                eval_gen_cases(
+                    cases=gen_test, config=dataset_config,
+                    container_factory=create_container,
+                    step_limit=step_limit, timeout=timeout,
+                    result_base=result_base, agent_name=agent_name,
+                    model_name=model_name, skill_type=skill_type,
+                    run_idx=local_run_idx, dry_run=dry_run, agent_type=agent_type,
+                    is_baseline=False, skill_mode=fusion_mode,
+                )
+
+            if exec_test and not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
+                                                          skill_type, local_run_idx, is_baseline=True, skill_mode=fusion_mode, agent_type=agent_type)[0]:
+                print(f"\n  [B] Evaluating BASELINE on {len(exec_test)} exec test cases...")
+                eval_exec_cases(
+                    cases=exec_test, config=config,
+                    container_factory=create_container,
+                    step_limit=step_limit, timeout=timeout,
+                    result_base=result_base, agent_name=agent_name,
+                    model_name=model_name, skill_type=skill_type,
+                    run_idx=local_run_idx, dry_run=dry_run, agent_type=agent_type,
+                    is_baseline=True, skill_mode=fusion_mode,
+                )
+
+            if gen_test and not _check_result_checkpoint(result_base, "gen", dataset_id, agent_name, model_name,
+                                                         skill_type, local_run_idx, is_baseline=True, skill_mode=fusion_mode, agent_type=agent_type)[0]:
+                print(f"\n  [B] Evaluating BASELINE on {len(gen_test)} gen test cases...")
+                eval_gen_cases(
+                    cases=gen_test, config=config,
+                    container_factory=create_container,
+                    step_limit=step_limit, timeout=timeout,
+                    result_base=result_base, agent_name=agent_name,
+                    model_name=model_name, skill_type=skill_type,
+                    run_idx=local_run_idx, dry_run=dry_run, agent_type=agent_type,
+                    is_baseline=True, skill_mode=fusion_mode,
+                )
+
+            print(f"\n  Run {local_run_idx}/{n_runs} for dataset {dataset_id} complete!")
+
+    total_duration = time.time() - start_time
+    print(f"\n{'='*60}")
+    print(f"All {total_iterations} fusion runs complete!")
+    print(f"Total duration: {total_duration:.1f}s")
+    print(f"{'='*60}\n")
+
+
+# ============================================================================
 # Main
 # ============================================================================
 
@@ -822,6 +1234,10 @@ Examples:
   python evaluation/run_redcode.py --skill constitutional --mode owaspai_general_controls.md --split exec --dataset_ids all
   python evaluation/run_redcode.py --skill constitutional --mode owaspai_general_controls.md nist_ai_rmf_playbook.json --split exec --dataset_ids all --n_runs 3
 
+  # Fusion (reuses existing base + constitutional skill files, fuses and evaluates)
+  python evaluation/run_redcode.py --skill fusion --fusion_base reactive --mode aggregate --split exec --dataset_ids all --n_runs 1
+  python evaluation/run_redcode.py --skill fusion --fusion_base proactive --mode separate --fusion_std owaspai_general_controls.md --split exec --dataset_ids 1 2 3
+
 Output:
   Each run generates TWO result files: skill + baseline comparison
 """
@@ -845,9 +1261,18 @@ Output:
     )
     parser.add_argument(
         '--mode', type=str, nargs='+', default=None,
-        help='Skill mode variant. For reactive/proactive: "aggregate" or "separate". '
+        help='Skill mode variant. For reactive/proactive/fusion: "aggregate" or "separate". '
              'For constitutional: safety standard filenames or "all" (expands to all standards). '
-             'Default: "aggregate" for reactive/proactive, "all" for constitutional.'
+             'Default: "aggregate" for reactive/proactive/fusion, "all" for constitutional.'
+    )
+    parser.add_argument(
+        '--fusion_base', type=str, choices=['reactive', 'proactive'], default=None,
+        help='(fusion only) Base skill type whose existing skill file to fuse. Required when --skill=fusion.'
+    )
+    parser.add_argument(
+        '--fusion_std', type=str, nargs='+', default=None,
+        help='(fusion only) Safety standard filenames for the constitutional skill to fuse, or "all". '
+             'Default: "all" (expands to all files in safety_standards/).'
     )
     parser.add_argument(
         '--split', type=str, choices=['exec', 'gen', 'all'], default='exec',
@@ -884,6 +1309,16 @@ Output:
         if len(mode_raw) != 1 or mode_raw[0] not in ('aggregate', 'separate'):
             parser.error("--mode must be 'aggregate' or 'separate' for reactive/proactive skills")
         skill_mode = mode_raw[0]  # str: "aggregate" or "separate"
+    elif args.skill == 'fusion':
+        # Fusion: --mode is aggregate/separate (same as reactive/proactive),
+        # --fusion_base is required, --fusion_std selects constitutional standards
+        if not args.fusion_base:
+            parser.error("--fusion_base is required for fusion skills (choose 'reactive' or 'proactive')")
+        mode_raw = args.mode or ['aggregate']
+        if len(mode_raw) != 1 or mode_raw[0] not in ('aggregate', 'separate'):
+            parser.error("--mode must be 'aggregate' or 'separate' for fusion skills")
+        skill_mode = mode_raw[0]  # str: "aggregate" or "separate"
+        fusion_std = resolve_constitutional_mode(args.fusion_std or ['all'])
     else:
         # Constitutional: mode is list of safety standard filenames.
         # Resolve "all" to the actual sorted list so naming is consistent.
@@ -912,6 +1347,8 @@ Output:
     print(f"Agent: {agent_name}")
     print(f"Model: {model_name}")
     print(f"Skill: {args.skill}, Mode: {skill_mode}")
+    if args.skill == 'fusion':
+        print(f"Fusion base: {args.fusion_base}, Fusion standards: {fusion_std}")
     print(f"GPUs: {gpus} ({len(gpus)} visible), Workers: {len(gpus)} (auto from CUDA_VISIBLE_DEVICES)\n")
 
     # ================================================================
@@ -935,6 +1372,24 @@ Output:
         experiment_fn = run_aggregate_experiment if skill_mode == 'aggregate' else run_separate_experiment
         experiment_fn(
             skill_type=args.skill,
+            split=args.split,
+            dataset_ids=dataset_ids,
+            all_datasets=all_datasets,
+            n_runs=args.n_runs,
+            config=config,
+            step_limit=args.step_limit,
+            timeout=args.timeout,
+            agent_name=agent_name,
+            model_name=model_name,
+            dry_run=args.dry_run,
+            agent_type=args.agent,
+        )
+
+    elif args.skill == 'fusion':
+        run_fusion_experiment(
+            fusion_base=args.fusion_base,
+            fusion_std=fusion_std,
+            base_mode=skill_mode,
             split=args.split,
             dataset_ids=dataset_ids,
             all_datasets=all_datasets,
@@ -984,7 +1439,7 @@ Output:
             # Per-dataset interleaving: for each dataset, run skill then baseline
             for dataset_id in exec_ids:
                 if not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
-                                                args.skill, run_idx, is_baseline=False, skill_mode=skill_mode, agent_type=args.agent):
+                                                args.skill, run_idx, is_baseline=False, skill_mode=skill_mode, agent_type=args.agent)[0]:
                     print("=" * 60)
                     print(f"[Exec Dataset {dataset_id}] WITH constitutional skill (run {run_idx})")
                     print("=" * 60 + "\n")
@@ -1007,7 +1462,7 @@ Output:
                     )
 
                 if not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
-                                                args.skill, run_idx, is_baseline=True, skill_mode=skill_mode, agent_type=args.agent):
+                                                args.skill, run_idx, is_baseline=True, skill_mode=skill_mode, agent_type=args.agent)[0]:
                     print("=" * 60)
                     print(f"[Exec Dataset {dataset_id}] BASELINE (no skill) (run {run_idx})")
                     print("=" * 60 + "\n")
@@ -1031,7 +1486,7 @@ Output:
 
             for category in gen_ids:
                 if not _check_result_checkpoint(result_base, "gen", category, agent_name, model_name,
-                                                args.skill, run_idx, is_baseline=False, skill_mode=skill_mode, agent_type=args.agent):
+                                                args.skill, run_idx, is_baseline=False, skill_mode=skill_mode, agent_type=args.agent)[0]:
                     print("=" * 60)
                     print(f"[Gen Category {category}] WITH constitutional skill (run {run_idx})")
                     print("=" * 60 + "\n")
@@ -1054,7 +1509,7 @@ Output:
                     )
 
                 if not _check_result_checkpoint(result_base, "gen", category, agent_name, model_name,
-                                                args.skill, run_idx, is_baseline=True, skill_mode=skill_mode, agent_type=args.agent):
+                                                args.skill, run_idx, is_baseline=True, skill_mode=skill_mode, agent_type=args.agent)[0]:
                     print("=" * 60)
                     print(f"[Gen Category {category}] BASELINE (no skill) (run {run_idx})")
                     print("=" * 60 + "\n")

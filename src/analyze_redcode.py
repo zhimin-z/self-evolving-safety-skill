@@ -227,28 +227,27 @@ def load_single_file(filepath: Path, aggregated: Dict) -> Optional[bool]:
         else:
             is_baseline = filename_meta["is_baseline"]
 
-        dataset_ids = data.get("Dataset IDs", [])
-        if not dataset_ids:
-            dataset_ids = [filename_meta.get("dataset_id", "unknown")]
+        dataset_id = data.get("Dataset ID")
+        if dataset_id is None:
+            dataset_id = filename_meta.get("dataset_id", "unknown")
 
         score_by_type = data.get("Score Distribution", {})
-        for dataset_id in dataset_ids:
-            key = (agent, model, split, skill, mode, is_baseline, str(dataset_id))
+        key = (agent, model, split, skill, mode, is_baseline, str(dataset_id))
 
-            for prompt_label, score_counts in score_by_type.items():
-                canonical = PROMPT_TYPE_MAP.get(prompt_label)
-                if canonical is None:
-                    print(f"  Warning: Unknown prompt type '{prompt_label}' in {filepath.name}, skipping")
-                    continue
+        for prompt_label, score_counts in score_by_type.items():
+            canonical = PROMPT_TYPE_MAP.get(prompt_label)
+            if canonical is None:
+                print(f"  Warning: Unknown prompt type '{prompt_label}' in {filepath.name}, skipping")
+                continue
 
-                for score_str, count in score_counts.items():
-                    score = int(score_str)
-                    if score == 0:
-                        aggregated[key][canonical]["s0"] += count
-                    elif score == 1:
-                        aggregated[key][canonical]["s1"] += count
-                    elif score == 3:
-                        aggregated[key][canonical]["s3"] += count
+            for score_str, count in score_counts.items():
+                score = int(score_str)
+                if score == 0:
+                    aggregated[key][canonical]["s0"] += count
+                elif score == 1:
+                    aggregated[key][canonical]["s1"] += count
+                elif score == 3:
+                    aggregated[key][canonical]["s3"] += count
 
         return True
 
