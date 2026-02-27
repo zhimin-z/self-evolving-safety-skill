@@ -70,6 +70,7 @@ from redcode_eval_core import (
     warmup_local_model,
     # Skill generation
     generate_skill_filename,
+    generate_result_filename,
     generate_skill_from_cases,
     inject_skill_into_config,
     # Evaluation
@@ -101,6 +102,16 @@ def _check_skill_checkpoint(output_dir, skill_type, split=None, dataset_ids=None
             print(f"  [Checkpoint] Skipping skill generation (reusing cached skill)")
             return content
     return None
+
+
+def _check_result_checkpoint(result_base, split, dataset_id, agent_name, model_name, skill_type, run_idx, is_baseline, skill_mode, agent_type=""):
+    """Check if a per-dataset result file already exists."""
+    filename = generate_result_filename(
+        split, [dataset_id], agent_name, model_name, skill_type, run_idx,
+        is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
+    )
+    path = os.path.join(result_base, filename)
+    return os.path.exists(path), filename
 
 
 # ============================================================================
@@ -480,8 +491,41 @@ def run_separate_experiment(
 
             print(f"  Train: {len(train_cases)} cases, Test: {len(test_cases)} cases")
 
+            skill_result_exists, skill_result_name = _check_result_checkpoint(
+                result_base=result_base,
+                split=dataset_split,
+                dataset_id=dataset_id,
+                agent_name=agent_name,
+                model_name=model_name,
+                skill_type=skill_type,
+                run_idx=local_run_idx,
+                is_baseline=False,
+                skill_mode="separate",
+                agent_type=agent_type,
+            )
+            baseline_result_exists, baseline_result_name = _check_result_checkpoint(
+                result_base=result_base,
+                split=dataset_split,
+                dataset_id=dataset_id,
+                agent_name=agent_name,
+                model_name=model_name,
+                skill_type=skill_type,
+                run_idx=local_run_idx,
+                is_baseline=True,
+                skill_mode="separate",
+                agent_type=agent_type,
+            )
+
+            if skill_result_exists:
+                print(f"  [Checkpoint] Found existing WITH-skill result: {skill_result_name} (skip part A + skill generation)")
+            if baseline_result_exists:
+                print(f"  [Checkpoint] Found existing BASELINE result: {baseline_result_name} (skip part B)")
+            if skill_result_exists and baseline_result_exists:
+                print("  [Checkpoint] Both results exist; skipping this dataset/run")
+                continue
+
             # Check for existing skill checkpoint (avoids expensive regeneration)
-            cached_skill = _check_skill_checkpoint(
+            cached_skill = None if skill_result_exists else _check_skill_checkpoint(
                 output_dir, skill_type, dataset_split, [dataset_id],
                 local_run_idx, skill_mode="separate", model_name=model_name, agent_type=agent_type
             )
@@ -589,9 +633,12 @@ def run_separate_experiment(
             # =====================================================================
             # PART A: Evaluate WITH skill
             # =====================================================================
-            print(f"\n  [A] Evaluating WITH {skill_type} skill on {len(test_cases)} test cases...")
+            if skill_result_exists:
+                print(f"\n  [A] WITH-skill result already exists -> skip")
+            else:
+                print(f"\n  [A] Evaluating WITH {skill_type} skill on {len(test_cases)} test cases...")
 
-            if exec_test:
+            if (not skill_result_exists) and exec_test:
                 eval_exec_cases(
                     cases=exec_test,
                     config=dataset_config,
@@ -609,7 +656,7 @@ def run_separate_experiment(
                     skill_mode="separate",
                 )
 
-            if gen_test:
+            if (not skill_result_exists) and gen_test:
                 eval_gen_cases(
                     cases=gen_test,
                     config=dataset_config,
@@ -630,9 +677,12 @@ def run_separate_experiment(
             # =====================================================================
             # PART B: Evaluate baseline (no skill) on same test cases for comparison
             # =====================================================================
-            print(f"\n  [B] Evaluating BASELINE (no skill) on same {len(test_cases)} test cases...")
+            if baseline_result_exists:
+                print(f"\n  [B] BASELINE result already exists -> skip")
+            else:
+                print(f"\n  [B] Evaluating BASELINE (no skill) on same {len(test_cases)} test cases...")
 
-            if exec_test:
+            if (not baseline_result_exists) and exec_test:
                 eval_exec_cases(
                     cases=exec_test,
                     config=config,  # Original config WITHOUT skill injection
@@ -650,7 +700,7 @@ def run_separate_experiment(
                     skill_mode="separate",
                 )
 
-            if gen_test:
+            if (not baseline_result_exists) and gen_test:
                 eval_gen_cases(
                     cases=gen_test,
                     config=config,  # Original config WITHOUT skill injection
@@ -860,90 +910,154 @@ Output:
 
             # Per-dataset interleaving: for each dataset, run skill then baseline
             for dataset_id in exec_ids:
-                print("=" * 60)
-                print(f"[Exec Dataset {dataset_id}] WITH constitutional skill (run {run_idx})")
-                print("=" * 60 + "\n")
-
-                run_evaluation(
-                    config=config,
-                    skill_type=args.skill,
-                    skill_content=skill_content,
+                skill_result_exists, skill_result_name = _check_result_checkpoint(
+                    result_base=os.path.join(REPO_ROOT, "results"),
                     split='exec',
-                    dataset_ids=[dataset_id],
-                    all_datasets=False,
-                    dry_run=args.dry_run,
-                    step_limit=args.step_limit,
-                    timeout=args.timeout,
+                    dataset_id=dataset_id,
                     agent_name=agent_name,
                     model_name=model_name,
-                    agent_type=args.agent,
-                    skill_mode=skill_mode,
-                    run_idx=run_idx,
-                )
-
-                print("=" * 60)
-                print(f"[Exec Dataset {dataset_id}] BASELINE (no skill) (run {run_idx})")
-                print("=" * 60 + "\n")
-
-                run_evaluation(
-                    config=config,
                     skill_type=args.skill,
-                    skill_content=None,
+                    run_idx=run_idx,
+                    is_baseline=False,
+                    skill_mode=skill_mode,
+                    agent_type=args.agent,
+                )
+                baseline_result_exists, baseline_result_name = _check_result_checkpoint(
+                    result_base=os.path.join(REPO_ROOT, "results"),
                     split='exec',
-                    dataset_ids=[dataset_id],
-                    all_datasets=False,
-                    dry_run=args.dry_run,
-                    step_limit=args.step_limit,
-                    timeout=args.timeout,
+                    dataset_id=dataset_id,
                     agent_name=agent_name,
                     model_name=model_name,
-                    agent_type=args.agent,
-                    skill_mode=skill_mode,
+                    skill_type=args.skill,
                     run_idx=run_idx,
+                    is_baseline=True,
+                    skill_mode=skill_mode,
+                    agent_type=args.agent,
                 )
+
+                if skill_result_exists:
+                    print(f"[Checkpoint] Found existing WITH-skill result: {skill_result_name} (skip)")
+                if baseline_result_exists:
+                    print(f"[Checkpoint] Found existing BASELINE result: {baseline_result_name} (skip)")
+
+                if not skill_result_exists:
+                    print("=" * 60)
+                    print(f"[Exec Dataset {dataset_id}] WITH constitutional skill (run {run_idx})")
+                    print("=" * 60 + "\n")
+
+                    run_evaluation(
+                        config=config,
+                        skill_type=args.skill,
+                        skill_content=skill_content,
+                        split='exec',
+                        dataset_ids=[dataset_id],
+                        all_datasets=False,
+                        dry_run=args.dry_run,
+                        step_limit=args.step_limit,
+                        timeout=args.timeout,
+                        agent_name=agent_name,
+                        model_name=model_name,
+                        agent_type=args.agent,
+                        skill_mode=skill_mode,
+                        run_idx=run_idx,
+                    )
+
+                if not baseline_result_exists:
+                    print("=" * 60)
+                    print(f"[Exec Dataset {dataset_id}] BASELINE (no skill) (run {run_idx})")
+                    print("=" * 60 + "\n")
+
+                    run_evaluation(
+                        config=config,
+                        skill_type=args.skill,
+                        skill_content=None,
+                        split='exec',
+                        dataset_ids=[dataset_id],
+                        all_datasets=False,
+                        dry_run=args.dry_run,
+                        step_limit=args.step_limit,
+                        timeout=args.timeout,
+                        agent_name=agent_name,
+                        model_name=model_name,
+                        agent_type=args.agent,
+                        skill_mode=skill_mode,
+                        run_idx=run_idx,
+                    )
 
             for category in gen_ids:
-                print("=" * 60)
-                print(f"[Gen Category {category}] WITH constitutional skill (run {run_idx})")
-                print("=" * 60 + "\n")
-
-                run_evaluation(
-                    config=config,
-                    skill_type=args.skill,
-                    skill_content=skill_content,
+                skill_result_exists, skill_result_name = _check_result_checkpoint(
+                    result_base=os.path.join(REPO_ROOT, "results"),
                     split='gen',
-                    dataset_ids=[category],
-                    all_datasets=False,
-                    dry_run=args.dry_run,
-                    step_limit=args.step_limit,
-                    timeout=args.timeout,
+                    dataset_id=category,
                     agent_name=agent_name,
                     model_name=model_name,
-                    agent_type=args.agent,
-                    skill_mode=skill_mode,
-                    run_idx=run_idx,
-                )
-
-                print("=" * 60)
-                print(f"[Gen Category {category}] BASELINE (no skill) (run {run_idx})")
-                print("=" * 60 + "\n")
-
-                run_evaluation(
-                    config=config,
                     skill_type=args.skill,
-                    skill_content=None,
+                    run_idx=run_idx,
+                    is_baseline=False,
+                    skill_mode=skill_mode,
+                    agent_type=args.agent,
+                )
+                baseline_result_exists, baseline_result_name = _check_result_checkpoint(
+                    result_base=os.path.join(REPO_ROOT, "results"),
                     split='gen',
-                    dataset_ids=[category],
-                    all_datasets=False,
-                    dry_run=args.dry_run,
-                    step_limit=args.step_limit,
-                    timeout=args.timeout,
+                    dataset_id=category,
                     agent_name=agent_name,
                     model_name=model_name,
-                    agent_type=args.agent,
-                    skill_mode=skill_mode,
+                    skill_type=args.skill,
                     run_idx=run_idx,
+                    is_baseline=True,
+                    skill_mode=skill_mode,
+                    agent_type=args.agent,
                 )
+
+                if skill_result_exists:
+                    print(f"[Checkpoint] Found existing WITH-skill result: {skill_result_name} (skip)")
+                if baseline_result_exists:
+                    print(f"[Checkpoint] Found existing BASELINE result: {baseline_result_name} (skip)")
+
+                if not skill_result_exists:
+                    print("=" * 60)
+                    print(f"[Gen Category {category}] WITH constitutional skill (run {run_idx})")
+                    print("=" * 60 + "\n")
+
+                    run_evaluation(
+                        config=config,
+                        skill_type=args.skill,
+                        skill_content=skill_content,
+                        split='gen',
+                        dataset_ids=[category],
+                        all_datasets=False,
+                        dry_run=args.dry_run,
+                        step_limit=args.step_limit,
+                        timeout=args.timeout,
+                        agent_name=agent_name,
+                        model_name=model_name,
+                        agent_type=args.agent,
+                        skill_mode=skill_mode,
+                        run_idx=run_idx,
+                    )
+
+                if not baseline_result_exists:
+                    print("=" * 60)
+                    print(f"[Gen Category {category}] BASELINE (no skill) (run {run_idx})")
+                    print("=" * 60 + "\n")
+
+                    run_evaluation(
+                        config=config,
+                        skill_type=args.skill,
+                        skill_content=None,
+                        split='gen',
+                        dataset_ids=[category],
+                        all_datasets=False,
+                        dry_run=args.dry_run,
+                        step_limit=args.step_limit,
+                        timeout=args.timeout,
+                        agent_name=agent_name,
+                        model_name=model_name,
+                        agent_type=args.agent,
+                        skill_mode=skill_mode,
+                        run_idx=run_idx,
+                    )
 
 
 if __name__ == "__main__":
