@@ -74,6 +74,7 @@ from redcode_eval_core import (
     generate_skill_from_cases,
     inject_skill_into_config,
     # Evaluation
+    generate_result_filename,
     eval_exec_cases,
     eval_gen_cases,
     generate_skill,
@@ -104,14 +105,53 @@ def _check_skill_checkpoint(output_dir, skill_type, split=None, dataset_ids=None
     return None
 
 
-def _check_result_checkpoint(result_base, split, dataset_id, agent_name, model_name, skill_type, run_idx, is_baseline, skill_mode, agent_type=""):
-    """Check if a per-dataset result file already exists."""
-    filename = generate_result_filename(
-        split, [dataset_id], agent_name, model_name, skill_type, run_idx,
+def _result_exists(result_base, split, dataset_ids, agent_name, model_name,
+                    skill_type, run_idx, is_baseline, skill_mode, agent_type):
+    """Silently check if a final result JSON already exists."""
+    result_filename = generate_result_filename(
+        split, dataset_ids, agent_name, model_name, skill_type, run_idx,
         is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
     )
-    path = os.path.join(result_base, filename)
-    return os.path.exists(path), filename
+    return os.path.exists(os.path.join(result_base, result_filename))
+
+
+def _check_result_checkpoint(result_base, split, dataset_ids, agent_name, model_name,
+                              skill_type, run_idx, is_baseline, skill_mode, agent_type):
+    """Check if a final result JSON already exists for this evaluation.
+
+    Returns True if the result file exists and the evaluation should be skipped.
+    This avoids expensive re-evaluation of completed runs on resume.
+    """
+    result_filename = generate_result_filename(
+        split, dataset_ids, agent_name, model_name, skill_type, run_idx,
+        is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
+    )
+    result_path = os.path.join(result_base, result_filename)
+    if os.path.exists(result_path):
+        print(f"  [Checkpoint] Result already exists: {result_filename}")
+        print(f"  [Checkpoint] Skipping evaluation (reusing cached result)")
+        return True
+    return False
+
+
+def _all_results_exist(result_base, exec_ids, gen_ids, agent_name, model_name,
+                        skill_type, run_idx, skill_mode, agent_type):
+    """Check if ALL per-dataset result files (both skill and baseline) exist for a run.
+
+    Returns True if every expected result file exists, meaning the entire run
+    (including training/skill generation) can be skipped.
+    """
+    for did in exec_ids:
+        for is_baseline in (False, True):
+            if not _result_exists(result_base, "exec", did, agent_name, model_name,
+                                  skill_type, run_idx, is_baseline, skill_mode, agent_type):
+                return False
+    for did in gen_ids:
+        for is_baseline in (False, True):
+            if not _result_exists(result_base, "gen", did, agent_name, model_name,
+                                  skill_type, run_idx, is_baseline, skill_mode, agent_type):
+                return False
+    return True
 
 
 # ============================================================================
@@ -192,6 +232,12 @@ def run_aggregate_experiment(
         print(f"\n{'='*60}")
         print(f"[Run {run_idx}/{n_runs}]")
         print(f"{'='*60}")
+
+        # Early skip: if ALL per-dataset results (skill + baseline) already exist, skip entire run
+        if _all_results_exist(result_base, exec_ids, gen_ids, agent_name, model_name,
+                              skill_type, run_idx, skill_mode="aggregate", agent_type=agent_type):
+            print(f"  [Checkpoint] All results exist for run {run_idx}, skipping entire run (incl. training)")
+            continue
 
         # Split cases: 50% train, 50% test (per-dataset split, no leakage)
         seed = run_idx  # Reproducible but different each run
@@ -321,77 +367,89 @@ def run_aggregate_experiment(
         # Per-dataset interleaving: skill then baseline for each dataset
         for dataset_id in sorted(exec_by_dataset.keys()):
             ds_cases = exec_by_dataset[dataset_id]
-            print(f"\n  [A] Evaluating WITH {skill_type} skill on exec dataset {dataset_id} ({len(ds_cases)} test cases)...")
-            eval_exec_cases(
-                cases=ds_cases,
-                config=run_config,
-                container_factory=create_container,
-                step_limit=step_limit,
-                timeout=timeout,
-                result_base=result_base,
-                agent_name=agent_name,
-                model_name=model_name,
-                skill_type=skill_type,
-                run_idx=run_idx,
-                dry_run=dry_run,
-                agent_type=agent_type,
-                is_baseline=False,
-                skill_mode="aggregate",
-            )
-            print(f"\n  [B] Evaluating BASELINE on exec dataset {dataset_id} ({len(ds_cases)} test cases)...")
-            eval_exec_cases(
-                cases=ds_cases,
-                config=config,
-                container_factory=create_container,
-                step_limit=step_limit,
-                timeout=timeout,
-                result_base=result_base,
-                agent_name=agent_name,
-                model_name=model_name,
-                skill_type=skill_type,
-                run_idx=run_idx,
-                dry_run=dry_run,
-                agent_type=agent_type,
-                is_baseline=True,
-                skill_mode="aggregate",
-            )
+
+            if not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
+                                            skill_type, run_idx, is_baseline=False, skill_mode="aggregate", agent_type=agent_type):
+                print(f"\n  [A] Evaluating WITH {skill_type} skill on exec dataset {dataset_id} ({len(ds_cases)} test cases)...")
+                eval_exec_cases(
+                    cases=ds_cases,
+                    config=run_config,
+                    container_factory=create_container,
+                    step_limit=step_limit,
+                    timeout=timeout,
+                    result_base=result_base,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    skill_type=skill_type,
+                    run_idx=run_idx,
+                    dry_run=dry_run,
+                    agent_type=agent_type,
+                    is_baseline=False,
+                    skill_mode="aggregate",
+                )
+
+            if not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
+                                            skill_type, run_idx, is_baseline=True, skill_mode="aggregate", agent_type=agent_type):
+                print(f"\n  [B] Evaluating BASELINE on exec dataset {dataset_id} ({len(ds_cases)} test cases)...")
+                eval_exec_cases(
+                    cases=ds_cases,
+                    config=config,
+                    container_factory=create_container,
+                    step_limit=step_limit,
+                    timeout=timeout,
+                    result_base=result_base,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    skill_type=skill_type,
+                    run_idx=run_idx,
+                    dry_run=dry_run,
+                    agent_type=agent_type,
+                    is_baseline=True,
+                    skill_mode="aggregate",
+                )
 
         for dataset_id in sorted(gen_by_dataset.keys()):
             ds_cases = gen_by_dataset[dataset_id]
-            print(f"\n  [A] Evaluating WITH {skill_type} skill on gen dataset {dataset_id} ({len(ds_cases)} test cases)...")
-            eval_gen_cases(
-                cases=ds_cases,
-                config=run_config,
-                container_factory=create_container,
-                step_limit=step_limit,
-                timeout=timeout,
-                result_base=result_base,
-                agent_name=agent_name,
-                model_name=model_name,
-                skill_type=skill_type,
-                run_idx=run_idx,
-                dry_run=dry_run,
-                agent_type=agent_type,
-                is_baseline=False,
-                skill_mode="aggregate",
-            )
-            print(f"\n  [B] Evaluating BASELINE on gen dataset {dataset_id} ({len(ds_cases)} test cases)...")
-            eval_gen_cases(
-                cases=ds_cases,
-                config=config,
-                container_factory=create_container,
-                step_limit=step_limit,
-                timeout=timeout,
-                result_base=result_base,
-                agent_name=agent_name,
-                model_name=model_name,
-                skill_type=skill_type,
-                run_idx=run_idx,
-                dry_run=dry_run,
-                agent_type=agent_type,
-                is_baseline=True,
-                skill_mode="aggregate",
-            )
+
+            if not _check_result_checkpoint(result_base, "gen", dataset_id, agent_name, model_name,
+                                            skill_type, run_idx, is_baseline=False, skill_mode="aggregate", agent_type=agent_type):
+                print(f"\n  [A] Evaluating WITH {skill_type} skill on gen dataset {dataset_id} ({len(ds_cases)} test cases)...")
+                eval_gen_cases(
+                    cases=ds_cases,
+                    config=run_config,
+                    container_factory=create_container,
+                    step_limit=step_limit,
+                    timeout=timeout,
+                    result_base=result_base,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    skill_type=skill_type,
+                    run_idx=run_idx,
+                    dry_run=dry_run,
+                    agent_type=agent_type,
+                    is_baseline=False,
+                    skill_mode="aggregate",
+                )
+
+            if not _check_result_checkpoint(result_base, "gen", dataset_id, agent_name, model_name,
+                                            skill_type, run_idx, is_baseline=True, skill_mode="aggregate", agent_type=agent_type):
+                print(f"\n  [B] Evaluating BASELINE on gen dataset {dataset_id} ({len(ds_cases)} test cases)...")
+                eval_gen_cases(
+                    cases=ds_cases,
+                    config=config,
+                    container_factory=create_container,
+                    step_limit=step_limit,
+                    timeout=timeout,
+                    result_base=result_base,
+                    agent_name=agent_name,
+                    model_name=model_name,
+                    skill_type=skill_type,
+                    run_idx=run_idx,
+                    dry_run=dry_run,
+                    agent_type=agent_type,
+                    is_baseline=True,
+                    skill_mode="aggregate",
+                )
 
         print(f"\n[Run {run_idx}/{n_runs}] Complete! (with skill + baseline)")
 
@@ -479,6 +537,15 @@ def run_separate_experiment(
             iteration += 1
             print(f"\n{'='*60}")
             print(f"[{iteration}/{total_iterations}] Dataset: {dataset_id}, Run: {local_run_idx}/{n_runs}")
+
+            # Early skip: if both skill and baseline results exist, skip entire iteration
+            skill_done = _result_exists(result_base, dataset_split, dataset_id, agent_name, model_name,
+                                        skill_type, local_run_idx, is_baseline=False, skill_mode="separate", agent_type=agent_type)
+            baseline_done = _result_exists(result_base, dataset_split, dataset_id, agent_name, model_name,
+                                           skill_type, local_run_idx, is_baseline=True, skill_mode="separate", agent_type=agent_type)
+            if skill_done and baseline_done:
+                print(f"  [Checkpoint] All results exist for dataset {dataset_id} run {local_run_idx}, skipping entire iteration (incl. training)")
+                continue
             print(f"{'='*60}")
 
             print(f"  Loaded {len(cases)} cases")
@@ -633,12 +700,9 @@ def run_separate_experiment(
             # =====================================================================
             # PART A: Evaluate WITH skill
             # =====================================================================
-            if skill_result_exists:
-                print(f"\n  [A] WITH-skill result already exists -> skip")
-            else:
-                print(f"\n  [A] Evaluating WITH {skill_type} skill on {len(test_cases)} test cases...")
-
-            if (not skill_result_exists) and exec_test:
+            if exec_test and not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
+                                                          skill_type, local_run_idx, is_baseline=False, skill_mode="separate", agent_type=agent_type):
+                print(f"\n  [A] Evaluating WITH {skill_type} skill on {len(exec_test)} exec test cases...")
                 eval_exec_cases(
                     cases=exec_test,
                     config=dataset_config,
@@ -656,7 +720,9 @@ def run_separate_experiment(
                     skill_mode="separate",
                 )
 
-            if (not skill_result_exists) and gen_test:
+            if gen_test and not _check_result_checkpoint(result_base, "gen", dataset_id, agent_name, model_name,
+                                                         skill_type, local_run_idx, is_baseline=False, skill_mode="separate", agent_type=agent_type):
+                print(f"\n  [A] Evaluating WITH {skill_type} skill on {len(gen_test)} gen test cases...")
                 eval_gen_cases(
                     cases=gen_test,
                     config=dataset_config,
@@ -677,12 +743,9 @@ def run_separate_experiment(
             # =====================================================================
             # PART B: Evaluate baseline (no skill) on same test cases for comparison
             # =====================================================================
-            if baseline_result_exists:
-                print(f"\n  [B] BASELINE result already exists -> skip")
-            else:
-                print(f"\n  [B] Evaluating BASELINE (no skill) on same {len(test_cases)} test cases...")
-
-            if (not baseline_result_exists) and exec_test:
+            if exec_test and not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
+                                                          skill_type, local_run_idx, is_baseline=True, skill_mode="separate", agent_type=agent_type):
+                print(f"\n  [B] Evaluating BASELINE (no skill) on {len(exec_test)} exec test cases...")
                 eval_exec_cases(
                     cases=exec_test,
                     config=config,  # Original config WITHOUT skill injection
@@ -700,7 +763,9 @@ def run_separate_experiment(
                     skill_mode="separate",
                 )
 
-            if (not baseline_result_exists) and gen_test:
+            if gen_test and not _check_result_checkpoint(result_base, "gen", dataset_id, agent_name, model_name,
+                                                         skill_type, local_run_idx, is_baseline=True, skill_mode="separate", agent_type=agent_type):
+                print(f"\n  [B] Evaluating BASELINE (no skill) on {len(gen_test)} gen test cases...")
                 eval_gen_cases(
                     cases=gen_test,
                     config=config,  # Original config WITHOUT skill injection
@@ -896,11 +961,19 @@ Output:
             print("Error: No valid dataset IDs to evaluate")
             sys.exit(1)
 
+        result_base = os.path.join(REPO_ROOT, "results")
+
         for run_idx in range(1, args.n_runs + 1):
             if args.n_runs > 1:
                 print(f"\n{'='*60}")
                 print(f"[Run {run_idx}/{args.n_runs}]")
                 print(f"{'='*60}")
+
+            # Early skip: if ALL per-dataset results (skill + baseline) already exist, skip entire run
+            if _all_results_exist(result_base, exec_ids, gen_ids, agent_name, model_name,
+                                  args.skill, run_idx, skill_mode=skill_mode, agent_type=args.agent):
+                print(f"  [Checkpoint] All results exist for run {run_idx}, skipping entire run (incl. skill generation)")
+                continue
 
             cached_skill = _check_skill_checkpoint(output_dir, args.skill, run_idx=run_idx, skill_mode=skill_mode, model_name=get_model_full_name(config), agent_type=args.agent)
             if cached_skill is not None:
@@ -910,37 +983,8 @@ Output:
 
             # Per-dataset interleaving: for each dataset, run skill then baseline
             for dataset_id in exec_ids:
-                skill_result_exists, skill_result_name = _check_result_checkpoint(
-                    result_base=os.path.join(REPO_ROOT, "results"),
-                    split='exec',
-                    dataset_id=dataset_id,
-                    agent_name=agent_name,
-                    model_name=model_name,
-                    skill_type=args.skill,
-                    run_idx=run_idx,
-                    is_baseline=False,
-                    skill_mode=skill_mode,
-                    agent_type=args.agent,
-                )
-                baseline_result_exists, baseline_result_name = _check_result_checkpoint(
-                    result_base=os.path.join(REPO_ROOT, "results"),
-                    split='exec',
-                    dataset_id=dataset_id,
-                    agent_name=agent_name,
-                    model_name=model_name,
-                    skill_type=args.skill,
-                    run_idx=run_idx,
-                    is_baseline=True,
-                    skill_mode=skill_mode,
-                    agent_type=args.agent,
-                )
-
-                if skill_result_exists:
-                    print(f"[Checkpoint] Found existing WITH-skill result: {skill_result_name} (skip)")
-                if baseline_result_exists:
-                    print(f"[Checkpoint] Found existing BASELINE result: {baseline_result_name} (skip)")
-
-                if not skill_result_exists:
+                if not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
+                                                args.skill, run_idx, is_baseline=False, skill_mode=skill_mode, agent_type=args.agent):
                     print("=" * 60)
                     print(f"[Exec Dataset {dataset_id}] WITH constitutional skill (run {run_idx})")
                     print("=" * 60 + "\n")
@@ -962,7 +1006,8 @@ Output:
                         run_idx=run_idx,
                     )
 
-                if not baseline_result_exists:
+                if not _check_result_checkpoint(result_base, "exec", dataset_id, agent_name, model_name,
+                                                args.skill, run_idx, is_baseline=True, skill_mode=skill_mode, agent_type=args.agent):
                     print("=" * 60)
                     print(f"[Exec Dataset {dataset_id}] BASELINE (no skill) (run {run_idx})")
                     print("=" * 60 + "\n")
@@ -985,37 +1030,8 @@ Output:
                     )
 
             for category in gen_ids:
-                skill_result_exists, skill_result_name = _check_result_checkpoint(
-                    result_base=os.path.join(REPO_ROOT, "results"),
-                    split='gen',
-                    dataset_id=category,
-                    agent_name=agent_name,
-                    model_name=model_name,
-                    skill_type=args.skill,
-                    run_idx=run_idx,
-                    is_baseline=False,
-                    skill_mode=skill_mode,
-                    agent_type=args.agent,
-                )
-                baseline_result_exists, baseline_result_name = _check_result_checkpoint(
-                    result_base=os.path.join(REPO_ROOT, "results"),
-                    split='gen',
-                    dataset_id=category,
-                    agent_name=agent_name,
-                    model_name=model_name,
-                    skill_type=args.skill,
-                    run_idx=run_idx,
-                    is_baseline=True,
-                    skill_mode=skill_mode,
-                    agent_type=args.agent,
-                )
-
-                if skill_result_exists:
-                    print(f"[Checkpoint] Found existing WITH-skill result: {skill_result_name} (skip)")
-                if baseline_result_exists:
-                    print(f"[Checkpoint] Found existing BASELINE result: {baseline_result_name} (skip)")
-
-                if not skill_result_exists:
+                if not _check_result_checkpoint(result_base, "gen", category, agent_name, model_name,
+                                                args.skill, run_idx, is_baseline=False, skill_mode=skill_mode, agent_type=args.agent):
                     print("=" * 60)
                     print(f"[Gen Category {category}] WITH constitutional skill (run {run_idx})")
                     print("=" * 60 + "\n")
@@ -1037,7 +1053,8 @@ Output:
                         run_idx=run_idx,
                     )
 
-                if not baseline_result_exists:
+                if not _check_result_checkpoint(result_base, "gen", category, agent_name, model_name,
+                                                args.skill, run_idx, is_baseline=True, skill_mode=skill_mode, agent_type=args.agent):
                     print("=" * 60)
                     print(f"[Gen Category {category}] BASELINE (no skill) (run {run_idx})")
                     print("=" * 60 + "\n")

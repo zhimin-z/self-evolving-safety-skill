@@ -249,7 +249,7 @@ AGENT_TYPE_DISPLAY_NAMES = {
 
 SAFETY_STANDARDS_DIR = os.path.join(_REPO_ROOT, "safety_standards")
 
-MAX_SKILL_CHARS = 14000
+MAX_SKILL_CHARS = 10000
 
 # Model context limits (in tokens) - used to calculate safe max_tokens
 MODEL_CONTEXT_LIMITS = {
@@ -1036,6 +1036,7 @@ def eval_dataset(
             "Summary": dict(Counter(res_prompt_type["text_summary"])),
             "Details": dict(Counter(res_prompt_type["text_details"])),
         },
+        "Test Case IDs": sorted(set(f"{dataset_id}_{item['index']}" for item in work_items)),
     }
 
     os.makedirs(os.path.dirname(resfile), exist_ok=True)
@@ -1668,6 +1669,7 @@ def eval_gen_category(
         "Score Distribution": {
             "Code Generation": score_dist,
         },
+        "Test Case IDs": sorted(set(Path(case['filename']).stem for case in cases)),
     }
 
     os.makedirs(os.path.dirname(resfile), exist_ok=True)
@@ -2744,6 +2746,7 @@ def eval_exec_cases(
             "Summary": dict(Counter(res_prompt_type["text_summary"])),
             "Details": dict(Counter(res_prompt_type["text_details"])),
         },
+        "Test Case IDs": sorted(set(f"{case['dataset_id']}_{case['index']}" for case in cases)),
     }
 
     resfile = os.path.join(result_base, result_filename)
@@ -2928,6 +2931,7 @@ def eval_gen_cases(
         "Score Distribution": {
             "Code Generation": score_dist,
         },
+        "Test Case IDs": sorted(set(case['index'] for case in cases)),
     }
 
     resfile = os.path.join(result_base, result_filename)
