@@ -37,6 +37,7 @@ Usage:
 import argparse
 import copy
 import hashlib
+import json
 import os
 import sys
 import time
@@ -172,6 +173,65 @@ def _cleanup_latest_result(result_base: str, split: str, skill_type: str, run_id
         latest = matches[-1]
         os.remove(latest)
         print(f"  [Cleanup] Deleted intermediate result: {os.path.basename(latest)}")
+
+
+def _derive_training_cases_from_results(
+    benchmark_dir: str,
+    split: str,
+    dataset_ids: list,
+    result_base: str,
+    agent_name: str,
+    model_name: str,
+    skill_type: str,
+    run_idx: int,
+    skill_mode,
+    agent_type: str,
+) -> list:
+    """Reconstruct training cases by excluding test case IDs found in result JSONs.
+
+    For each dataset_id, loads the result JSON (skill, not baseline) to find
+    which test case IDs were used for evaluation. All other cases become the
+    training set.
+
+    Returns:
+        List of case dicts suitable for generate_skill_from_cases().
+    """
+    all_cases = load_redcode_datasets_for_generation(benchmark_dir, split, dataset_ids)
+    if not all_cases:
+        print("  Warning: No cases loaded from benchmark")
+        return []
+
+    # Build exclusion set per dataset: {dataset_id -> set of index strings to exclude}
+    exclude_indices = set()
+
+    for did in dataset_ids:
+        result_filename = generate_result_filename(
+            split, did, agent_name, model_name, skill_type, run_idx,
+            is_baseline=False, skill_mode=skill_mode, agent_type=agent_type,
+        )
+        result_path = os.path.join(result_base, result_filename)
+
+        if not os.path.exists(result_path):
+            print(f"  Warning: Result file not found: {result_filename}")
+            print(f"    Including ALL cases from dataset {did} in training set")
+            continue
+
+        with open(result_path, "r") as f:
+            data = json.load(f)
+
+        test_case_ids = data.get("Test Case IDs", [])
+        dataset_id = str(data.get("Dataset ID", did))
+
+        # Test Case IDs are ints like [2, 3, 5]; case['index'] is str like "10_2"
+        for tid in test_case_ids:
+            exclude_indices.add(f"{dataset_id}_{tid}")
+
+    # Filter: keep cases NOT in the test set
+    training_cases = [c for c in all_cases if c["index"] not in exclude_indices]
+
+    print(f"  Derived training set: {len(training_cases)} cases "
+          f"(excluded {len(all_cases) - len(training_cases)} test cases from {len(all_cases)} total)")
+    return training_cases
 
 
 def run_aggregate_experiment(
@@ -816,6 +876,153 @@ def _fusion_skill_mode(fusion_base: str, base_mode: str, fusion_std: list) -> st
     return f"{fusion_base}.{base_mode}.{std_suffix}"
 
 
+def _ensure_skill_exists(
+    skill_type: str,
+    output_dir: str,
+    skill_mode,
+    model_name: str,
+    agent_type: str,
+    # Only needed for reactive/proactive regeneration:
+    split: str = None,
+    dataset_ids: list = None,
+    run_idx: int = None,
+    config: dict = None,
+    step_limit: int = None,
+    timeout: int = None,
+    agent_name: str = None,
+    dry_run: bool = False,
+    benchmark_dir: str = None,
+    result_base: str = None,
+):
+    """Check if a skill .md file exists; if missing, regenerate it.
+
+    For constitutional: generates from safety standard documents.
+    For reactive/proactive: derives training set from result JSONs (excluding
+    test case IDs), optionally runs baseline for reactive, then generates skill.
+    """
+    filename = generate_skill_filename(
+        skill_type, split, dataset_ids, run_idx,
+        skill_mode=skill_mode, model_name=model_name, agent_type=agent_type,
+    )
+    path = os.path.join(output_dir, filename)
+    if os.path.exists(path):
+        return  # Already exists, nothing to do
+
+    print(f"\n  [Auto-regenerate] Skill file missing: {filename}")
+    print(f"  Regenerating {skill_type} skill...")
+
+    if skill_type == "constitutional":
+        generate_skill(
+            skill_type="constitutional",
+            split=None,
+            dataset_ids=None,
+            model=model_name,
+            skill_mode=skill_mode,
+            agent_type=agent_type,
+        )
+        return
+
+    # Reactive or proactive: derive training set from result JSONs
+    if not all([benchmark_dir, result_base, config, dataset_ids]):
+        print(f"  ERROR: Cannot regenerate {skill_type} skill — missing parameters")
+        print(f"  Run the '{skill_type}' experiment first to generate this skill.")
+        sys.exit(1)
+
+    training_cases = _derive_training_cases_from_results(
+        benchmark_dir=benchmark_dir,
+        split=split,
+        dataset_ids=dataset_ids,
+        result_base=result_base,
+        agent_name=agent_name,
+        model_name=model_name,
+        skill_type=skill_type,
+        run_idx=run_idx,
+        skill_mode=skill_mode,
+        agent_type=agent_type,
+    )
+
+    if not training_cases:
+        print(f"  ERROR: No training cases derived — cannot regenerate {skill_type} skill")
+        sys.exit(1)
+
+    if skill_type == "reactive":
+        # Reactive requires baseline evaluation to find failed cases (score != 0)
+        print(f"  [Reactive] Running baseline on {len(training_cases)} training cases...")
+
+        def create_container():
+            return Container("redcode")
+
+        exec_train = [c for c in training_cases if c["split"] == "exec"]
+        gen_train = [c for c in training_cases if c["split"] == "gen"]
+        baseline_results = []
+
+        if exec_train:
+            exec_log = eval_exec_cases(
+                cases=exec_train,
+                config=config,
+                container_factory=create_container,
+                step_limit=step_limit,
+                timeout=timeout,
+                result_base=result_base,
+                agent_name=agent_name,
+                model_name=model_name,
+                skill_type=skill_type,
+                run_idx=run_idx,
+                dry_run=dry_run,
+                agent_type=agent_type,
+                is_baseline=True,
+                skill_mode=skill_mode,
+            )
+            baseline_results.extend(exec_log.get("Results", []))
+            _cleanup_latest_result(result_base, "exec", skill_type, run_idx,
+                                   is_baseline=True, skill_mode=skill_mode)
+
+        if gen_train:
+            gen_log = eval_gen_cases(
+                cases=gen_train,
+                config=config,
+                container_factory=create_container,
+                step_limit=step_limit,
+                timeout=timeout,
+                result_base=result_base,
+                agent_name=agent_name,
+                model_name=model_name,
+                skill_type=skill_type,
+                run_idx=run_idx,
+                dry_run=dry_run,
+                agent_type=agent_type,
+                is_baseline=True,
+                skill_mode=skill_mode,
+            )
+            baseline_results.extend(gen_log.get("Results", []))
+            _cleanup_latest_result(result_base, "gen", skill_type, run_idx,
+                                   is_baseline=True, skill_mode=skill_mode)
+
+        failed_cases = filter_failed_cases_from_baseline(baseline_results, training_cases)
+        print(f"  [Reactive] Baseline failures: {len(failed_cases)}/{len(training_cases)} training cases")
+
+        if not failed_cases:
+            print(f"  [Reactive] No failures found — baseline refused all training cases.")
+            print(f"  Cannot generate reactive skill without failure examples.")
+            sys.exit(1)
+
+        training_cases = failed_cases
+
+    # Generate and save skill (generate_skill_from_cases calls save_skill internally)
+    generate_skill_from_cases(
+        skill_type=skill_type,
+        cases=training_cases,
+        split=split,
+        output_dir=output_dir,
+        dataset_ids=dataset_ids,
+        run_idx=run_idx,
+        model=model_name,
+        skill_mode=skill_mode,
+        agent_type=agent_type,
+    )
+    print(f"  [Auto-regenerate] Skill regenerated successfully: {filename}")
+
+
 def _locate_skill_file(output_dir: str, skill_type: str, split: str = None,
                        dataset_ids=None, run_idx: int = None, skill_mode=None,
                        model_name: str = "", agent_type: str = "") -> str:
@@ -891,6 +1098,13 @@ def run_fusion_experiment(
     # Load constitutional skill once (shared across all runs)
     print(f"\n[1] Locating constitutional skill...")
     const_skill_mode = fusion_std  # list of filenames
+    _ensure_skill_exists(
+        skill_type="constitutional",
+        output_dir=output_dir,
+        skill_mode=const_skill_mode,
+        model_name=full_model,
+        agent_type=agent_type,
+    )
     constitutional_content = _locate_skill_file(
         output_dir, "constitutional",
         skill_mode=const_skill_mode, model_name=full_model, agent_type=agent_type
@@ -962,6 +1176,23 @@ def _run_fusion_aggregate(
         else:
             # Locate base skill (aggregate: one skill for all datasets)
             print(f"\n[2] Locating base {fusion_base} skill (aggregate)...")
+            _ensure_skill_exists(
+                skill_type=fusion_base,
+                output_dir=output_dir,
+                skill_mode="aggregate",
+                model_name=full_model,
+                agent_type=agent_type,
+                split=split,
+                dataset_ids=all_dataset_ids,
+                run_idx=run_idx,
+                config=config,
+                step_limit=step_limit,
+                timeout=timeout,
+                agent_name=agent_name,
+                dry_run=dry_run,
+                benchmark_dir=os.path.join(REPO_ROOT, "external/RedCode/dataset"),
+                result_base=result_base,
+            )
             base_content = _locate_skill_file(
                 output_dir, fusion_base, split, all_dataset_ids,
                 run_idx, skill_mode="aggregate", model_name=full_model, agent_type=agent_type
@@ -1115,6 +1346,23 @@ def _run_fusion_separate(
             else:
                 # Locate per-dataset base skill
                 print(f"  Locating base {fusion_base} skill (separate, dataset {dataset_id})...")
+                _ensure_skill_exists(
+                    skill_type=fusion_base,
+                    output_dir=output_dir,
+                    skill_mode="separate",
+                    model_name=full_model,
+                    agent_type=agent_type,
+                    split=dataset_split,
+                    dataset_ids=[dataset_id],
+                    run_idx=local_run_idx,
+                    config=config,
+                    step_limit=step_limit,
+                    timeout=timeout,
+                    agent_name=agent_name,
+                    dry_run=dry_run,
+                    benchmark_dir=benchmark_dir,
+                    result_base=result_base,
+                )
                 base_content = _locate_skill_file(
                     output_dir, fusion_base, dataset_split, [dataset_id],
                     local_run_idx, skill_mode="separate", model_name=full_model, agent_type=agent_type

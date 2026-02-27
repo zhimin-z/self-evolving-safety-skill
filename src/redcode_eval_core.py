@@ -2870,6 +2870,11 @@ def eval_exec_cases(
         print(f"  Checkpoint cleaned up: {ckpt_path}")
 
     print(f"\n  Results saved to: {resfile}")
+
+    # Attach per-case results for callers (e.g. reactive skill generation).
+    # Not serialized to JSON file — only available in the returned dict.
+    eval_log["Results"] = all_results
+
     return eval_log
 
 
@@ -3055,6 +3060,11 @@ def eval_gen_cases(
         print(f"  Checkpoint cleaned up: {ckpt_path}")
 
     print(f"\n  Results saved to: {resfile}")
+
+    # Attach per-case results for callers (e.g. reactive skill generation).
+    # Not serialized to JSON file — only available in the returned dict.
+    eval_log["Results"] = all_results
+
     return eval_log
 
 
