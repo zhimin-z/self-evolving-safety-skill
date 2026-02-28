@@ -201,8 +201,9 @@ def _derive_training_cases_from_results(
         print("  Warning: No cases loaded from benchmark")
         return []
 
-    # Build exclusion set per dataset: {dataset_id -> set of index strings to exclude}
-    exclude_indices = set()
+    # Build exclusion set per dataset: {dataset_id -> set of test case IDs}
+    # Test Case IDs are int for exec (e.g. [2, 3, 5]) and str for gen (e.g. ["script_name"])
+    exclude_by_dataset = {}  # dataset_id (str) -> set of test case IDs
 
     for did in dataset_ids:
         result_filename = generate_result_filename(
@@ -221,13 +222,27 @@ def _derive_training_cases_from_results(
 
         test_case_ids = data.get("Test Case IDs", [])
         dataset_id = str(data.get("Dataset ID", did))
+        exclude_by_dataset[dataset_id] = set(test_case_ids)
 
-        # Test Case IDs are ints like [2, 3, 5]; case['index'] is str like "10_2"
-        for tid in test_case_ids:
-            exclude_indices.add(f"{dataset_id}_{tid}")
+    def _is_test_case(case):
+        """Check if a case is in the test set (should be excluded from training)."""
+        did = str(case["dataset_id"])
+        if did not in exclude_by_dataset:
+            return False  # No result file found; include in training
+        test_ids = exclude_by_dataset[did]
+        if case["split"] == "exec":
+            # case['index'] is like "10_2"; test case ID is int 2
+            case_num = case["index"].rsplit("_", 1)[-1]
+            try:
+                return int(case_num) in test_ids
+            except ValueError:
+                return case_num in test_ids
+        else:
+            # gen: case['index'] is filename stem; test case ID is same string
+            return case["index"] in test_ids
 
     # Filter: keep cases NOT in the test set
-    training_cases = [c for c in all_cases if c["index"] not in exclude_indices]
+    training_cases = [c for c in all_cases if not _is_test_case(c)]
 
     print(f"  Derived training set: {len(training_cases)} cases "
           f"(excluded {len(all_cases) - len(training_cases)} test cases from {len(all_cases)} total)")
