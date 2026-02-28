@@ -625,7 +625,7 @@ def run_separate_experiment(
             skill_result_exists, skill_result_name = _check_result_checkpoint(
                 result_base=result_base,
                 split=dataset_split,
-                dataset_id=dataset_id,
+                dataset_ids=[dataset_id],
                 agent_name=agent_name,
                 model_name=model_name,
                 skill_type=skill_type,
@@ -637,7 +637,7 @@ def run_separate_experiment(
             baseline_result_exists, baseline_result_name = _check_result_checkpoint(
                 result_base=result_base,
                 split=dataset_split,
-                dataset_id=dataset_id,
+                dataset_ids=[dataset_id],
                 agent_name=agent_name,
                 model_name=model_name,
                 skill_type=skill_type,
