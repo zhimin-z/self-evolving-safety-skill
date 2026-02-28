@@ -1189,7 +1189,9 @@ def generate_result_filename(
         Filename like: mini-swe-agent_claude-haiku-4.5_exec_1-2-3_reactive-aggregate_baseline_run1.json
                    or: mini-swe-agent_claude-haiku-4.5_exec_4_constitutional-nist-owasp_skill_run1.json
     """
-    model_clean = model_name.replace("/", "-").replace(" ", "_")
+    # Normalize: extract short model name (e.g. "openrouter/deepseek/deepseek-v3.2" -> "deepseek-v3.2")
+    short_model = model_name.split("/")[-1] if "/" in model_name else model_name
+    model_clean = short_model.replace(" ", "_")
     agent_display = AGENT_TYPE_DISPLAY_NAMES.get(agent_type, agent_type) if agent_type else agent_name.replace("/", "-").replace(" ", "_")
 
     # Format dataset_ids: join with hyphen if list, otherwise use as-is
