@@ -175,6 +175,62 @@ def _cleanup_latest_result(result_base: str, split: str, skill_type: str, run_id
         print(f"  [Cleanup] Deleted intermediate result: {os.path.basename(latest)}")
 
 
+def _load_test_case_ids_from_results(
+    result_base: str,
+    split: str,
+    dataset_ids: list,
+    agent_name: str,
+    model_name: str,
+    skill_type: str,
+    run_idx: int,
+    skill_mode,
+    agent_type: str,
+) -> dict:
+    """Load test case IDs from result JSONs for each dataset.
+
+    Returns:
+        Dict mapping dataset_id (str) -> set of test case IDs
+        (int for exec, str for gen).
+    """
+    test_ids_by_dataset = {}
+
+    for did in dataset_ids:
+        result_filename = generate_result_filename(
+            split, did, agent_name, model_name, skill_type, run_idx,
+            is_baseline=False, skill_mode=skill_mode, agent_type=agent_type,
+        )
+        result_path = os.path.join(result_base, result_filename)
+
+        if not os.path.exists(result_path):
+            print(f"  Warning: Result file not found: {result_filename}")
+            continue
+
+        with open(result_path, "r") as f:
+            data = json.load(f)
+
+        test_case_ids = data.get("Test Case IDs", [])
+        dataset_id = str(data.get("Dataset ID", did))
+        test_ids_by_dataset[dataset_id] = set(test_case_ids)
+
+    return test_ids_by_dataset
+
+
+def _case_matches_test_ids(case: dict, test_ids: set) -> bool:
+    """Check if a case's index matches one of the test case IDs.
+
+    Exec: case['index'] is like "10_2"; test case ID is int 2.
+    Gen:  case['index'] is filename stem; test case ID is same string.
+    """
+    if case["split"] == "exec":
+        case_num = case["index"].rsplit("_", 1)[-1]
+        try:
+            return int(case_num) in test_ids
+        except ValueError:
+            return case_num in test_ids
+    else:
+        return case["index"] in test_ids
+
+
 def _derive_training_cases_from_results(
     benchmark_dir: str,
     split: str,
@@ -201,52 +257,66 @@ def _derive_training_cases_from_results(
         print("  Warning: No cases loaded from benchmark")
         return []
 
-    # Build exclusion set per dataset: {dataset_id -> set of test case IDs}
-    # Test Case IDs are int for exec (e.g. [2, 3, 5]) and str for gen (e.g. ["script_name"])
-    exclude_by_dataset = {}  # dataset_id (str) -> set of test case IDs
-
-    for did in dataset_ids:
-        result_filename = generate_result_filename(
-            split, did, agent_name, model_name, skill_type, run_idx,
-            is_baseline=False, skill_mode=skill_mode, agent_type=agent_type,
-        )
-        result_path = os.path.join(result_base, result_filename)
-
-        if not os.path.exists(result_path):
-            print(f"  Warning: Result file not found: {result_filename}")
-            print(f"    Including ALL cases from dataset {did} in training set")
-            continue
-
-        with open(result_path, "r") as f:
-            data = json.load(f)
-
-        test_case_ids = data.get("Test Case IDs", [])
-        dataset_id = str(data.get("Dataset ID", did))
-        exclude_by_dataset[dataset_id] = set(test_case_ids)
+    test_ids_by_dataset = _load_test_case_ids_from_results(
+        result_base, split, dataset_ids, agent_name, model_name,
+        skill_type, run_idx, skill_mode, agent_type,
+    )
 
     def _is_test_case(case):
-        """Check if a case is in the test set (should be excluded from training)."""
         did = str(case["dataset_id"])
-        if did not in exclude_by_dataset:
+        if did not in test_ids_by_dataset:
             return False  # No result file found; include in training
-        test_ids = exclude_by_dataset[did]
-        if case["split"] == "exec":
-            # case['index'] is like "10_2"; test case ID is int 2
-            case_num = case["index"].rsplit("_", 1)[-1]
-            try:
-                return int(case_num) in test_ids
-            except ValueError:
-                return case_num in test_ids
-        else:
-            # gen: case['index'] is filename stem; test case ID is same string
-            return case["index"] in test_ids
+        return _case_matches_test_ids(case, test_ids_by_dataset[did])
 
-    # Filter: keep cases NOT in the test set
     training_cases = [c for c in all_cases if not _is_test_case(c)]
 
     print(f"  Derived training set: {len(training_cases)} cases "
           f"(excluded {len(all_cases) - len(training_cases)} test cases from {len(all_cases)} total)")
     return training_cases
+
+
+def _derive_test_cases_from_results(
+    all_cases: list,
+    result_base: str,
+    split: str,
+    dataset_ids: list,
+    agent_name: str,
+    model_name: str,
+    skill_type: str,
+    run_idx: int,
+    skill_mode,
+    agent_type: str,
+) -> list:
+    """Derive test cases by reading Test Case IDs from the base experiment's result JSONs.
+
+    The inverse of _derive_training_cases_from_results: keeps only cases whose
+    IDs appear in the result files' "Test Case IDs" field.
+
+    Args:
+        all_cases: Full list of cases (already loaded).
+        Others: Parameters to locate the base experiment's result files.
+
+    Returns:
+        List of case dicts that were in the test set.
+    """
+    test_ids_by_dataset = _load_test_case_ids_from_results(
+        result_base, split, dataset_ids, agent_name, model_name,
+        skill_type, run_idx, skill_mode, agent_type,
+    )
+
+    if not test_ids_by_dataset:
+        print("  Warning: No test case IDs found in any result files")
+        return []
+
+    test_cases = []
+    for case in all_cases:
+        did = str(case["dataset_id"])
+        if did in test_ids_by_dataset and _case_matches_test_ids(case, test_ids_by_dataset[did]):
+            test_cases.append(case)
+
+    print(f"  Loaded test set from result files: {len(test_cases)} test cases "
+          f"(from {len(test_ids_by_dataset)} dataset(s))")
+    return test_cases
 
 
 def run_aggregate_experiment(
@@ -1224,10 +1294,12 @@ def _run_fusion_aggregate(
             save_skill(fused_content, skill_type, output_dir, split, all_dataset_ids,
                        run_idx, skill_mode=fusion_mode, model_name=model_name, agent_type=agent_type)
 
-        # Reconstruct test split (same seed as aggregate experiment)
-        seed = run_idx
-        _, test_cases = split_cases_by_dataset(all_cases, train_ratio=0.5, seed=seed)
-        print(f"  Reconstructed test split: {len(test_cases)} test cases (seed={seed})")
+        # Derive test cases from the base experiment's result files
+        test_cases = _derive_test_cases_from_results(
+            all_cases, result_base, split, all_dataset_ids,
+            agent_name, model_name, fusion_base, run_idx,
+            skill_mode="aggregate", agent_type=agent_type,
+        )
 
         # Inject and evaluate
         run_config = copy.deepcopy(config)
@@ -1394,11 +1466,12 @@ def _run_fusion_separate(
                 save_skill(fused_content, skill_type, output_dir, dataset_split, [dataset_id],
                            local_run_idx, skill_mode=fusion_mode, model_name=model_name, agent_type=agent_type)
 
-            # Reconstruct test split (same seed as separate experiment)
-            dataset_hash = int(hashlib.md5(str(dataset_id).encode()).hexdigest(), 16)
-            seed = (dataset_hash + local_run_idx) % (2**31)
-            _, test_cases = split_cases_by_dataset(cases, train_ratio=0.5, seed=seed)
-            print(f"  Reconstructed test split: {len(test_cases)} test cases (seed={seed})")
+            # Derive test cases from the base experiment's result files
+            test_cases = _derive_test_cases_from_results(
+                cases, result_base, dataset_split, [dataset_id],
+                agent_name, model_name, fusion_base, local_run_idx,
+                skill_mode="separate", agent_type=agent_type,
+            )
 
             # Inject and evaluate
             dataset_config = copy.deepcopy(config)
