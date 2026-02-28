@@ -163,18 +163,6 @@ def _all_results_exist(result_base, exec_ids, gen_ids, agent_name, model_name,
 # Aggregated Reactive/Proactive Experiment
 # ============================================================================
 
-def _cleanup_latest_result(result_base: str, split: str, skill_type: str, run_idx: int, is_baseline: bool, skill_mode):
-    """Delete the most recently created result file matching the pattern (intermediate cleanup)."""
-    import glob
-    mode_str = _skill_mode_suffix(skill_mode)
-    pattern = os.path.join(result_base, f"{split}_*_{skill_type}-{mode_str}_{'baseline' if is_baseline else 'skill'}_run{run_idx}_*.json")
-    matches = sorted(glob.glob(pattern), key=os.path.getmtime)
-    if matches:
-        latest = matches[-1]
-        os.remove(latest)
-        print(f"  [Cleanup] Deleted intermediate result: {os.path.basename(latest)}")
-
-
 def _load_test_case_ids_from_results(
     result_base: str,
     split: str,
@@ -432,11 +420,9 @@ def run_aggregate_experiment(
                     agent_type=agent_type,
                     is_baseline=True,
                     skill_mode="aggregate",
+                    persist_results=False,
                 )
                 train_baseline_results.extend(exec_log.get("Results", []))
-
-                # Delete intermediate train baseline result file
-                _cleanup_latest_result(result_base, "exec", skill_type, run_idx, is_baseline=True, skill_mode="aggregate")
 
             if gen_train:
                 gen_log = eval_gen_cases(
@@ -454,11 +440,9 @@ def run_aggregate_experiment(
                     agent_type=agent_type,
                     is_baseline=True,
                     skill_mode="aggregate",
+                    persist_results=False,
                 )
                 train_baseline_results.extend(gen_log.get("Results", []))
-
-                # Delete intermediate train baseline result file
-                _cleanup_latest_result(result_base, "gen", skill_type, run_idx, is_baseline=True, skill_mode="aggregate")
 
             # Filter for failed cases only
             failed_cases = filter_failed_cases_from_baseline(train_baseline_results, train_cases)
@@ -776,9 +760,9 @@ def run_separate_experiment(
                         agent_type=agent_type,
                         is_baseline=True,
                         skill_mode="separate",
+                        persist_results=False,
                     )
                     train_baseline_results.extend(exec_log.get("Results", []))
-                    _cleanup_latest_result(result_base, "exec", skill_type, local_run_idx, is_baseline=True, skill_mode="separate")
 
                 if gen_train:
                     gen_log = eval_gen_cases(
@@ -796,9 +780,9 @@ def run_separate_experiment(
                         agent_type=agent_type,
                         is_baseline=True,
                         skill_mode="separate",
+                        persist_results=False,
                     )
                     train_baseline_results.extend(gen_log.get("Results", []))
-                    _cleanup_latest_result(result_base, "gen", skill_type, local_run_idx, is_baseline=True, skill_mode="separate")
 
                 failed_cases = filter_failed_cases_from_baseline(train_baseline_results, train_cases)
                 print(f"\n  [Reactive] Baseline failures: {len(failed_cases)}/{len(train_cases)} train cases failed")
@@ -1057,10 +1041,9 @@ def _ensure_skill_exists(
                 agent_type=agent_type,
                 is_baseline=True,
                 skill_mode=skill_mode,
+                persist_results=False,
             )
             baseline_results.extend(exec_log.get("Results", []))
-            _cleanup_latest_result(result_base, "exec", skill_type, run_idx,
-                                   is_baseline=True, skill_mode=skill_mode)
 
         if gen_train:
             gen_log = eval_gen_cases(
@@ -1078,10 +1061,9 @@ def _ensure_skill_exists(
                 agent_type=agent_type,
                 is_baseline=True,
                 skill_mode=skill_mode,
+                persist_results=False,
             )
             baseline_results.extend(gen_log.get("Results", []))
-            _cleanup_latest_result(result_base, "gen", skill_type, run_idx,
-                                   is_baseline=True, skill_mode=skill_mode)
 
         failed_cases = filter_failed_cases_from_baseline(baseline_results, training_cases)
         print(f"  [Reactive] Baseline failures: {len(failed_cases)}/{len(training_cases)} training cases")

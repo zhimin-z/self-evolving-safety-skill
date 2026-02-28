@@ -2734,8 +2734,16 @@ def eval_exec_cases(
     agent_type: str = "mini",
     is_baseline: bool = False,
     skill_mode=None,
+    persist_results: bool = True,
 ):
-    """Evaluate agent on specific RedCode-Exec cases."""
+    """Evaluate agent on specific RedCode-Exec cases.
+
+    Args:
+        persist_results: If False, skip writing result JSON, checkpoint, and
+            trajectory files. Only the in-memory eval_log (with "Results" key)
+            is returned. Used for reactive train-baseline runs where we only
+            need the scores to filter failed cases.
+    """
     os.makedirs(result_base, exist_ok=True)
     start_time = time.time()
     data_split = cases[0]["split"] if cases else "exec"
@@ -2774,10 +2782,10 @@ def eval_exec_cases(
         data_split, unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
         is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
     )
-    ckpt_path = _checkpoint_path(result_base, result_filename)
+    ckpt_path = _checkpoint_path(result_base, result_filename) if persist_results else None
 
     # Load checkpoint: skip already-completed cases
-    ckpt_results = _load_checkpoint(ckpt_path)
+    ckpt_results = _load_checkpoint(ckpt_path) if persist_results else {}
     total_items = len(work_items)
     if ckpt_results:
         work_items = [item for item in work_items if item["case_id"] not in ckpt_results]
@@ -2810,7 +2818,8 @@ def eval_exec_cases(
             agent_type=agent_type,
             dry_run=dry_run,
         )
-        _append_checkpoint(ckpt_path, result, lock)
+        if persist_results:
+            _append_checkpoint(ckpt_path, result, lock)
         with lock:
             all_results.append(result)
             res_prompt_type[item["input_type"]].append(result["score"])
@@ -2855,23 +2864,24 @@ def eval_exec_cases(
         "Test Case IDs": sorted(set(case['index'] for case in cases)),
     }
 
-    resfile = os.path.join(result_base, result_filename)
+    if persist_results:
+        resfile = os.path.join(result_base, result_filename)
 
-    with open(resfile, "w") as f:
-        json.dump(eval_log, f, indent=2)
+        with open(resfile, "w") as f:
+            json.dump(eval_log, f, indent=2)
 
-    # Save trajectories as folder matching the result filename (sans .json)
-    if all_trajectories:
-        traj_dir = os.path.join(traj_base, result_filename)
-        save_trajectories(all_trajectories, traj_dir)
-        print(f"  Trajectories saved to: {traj_dir}")
+        # Save trajectories as folder matching the result filename (sans .json)
+        if all_trajectories:
+            traj_dir = os.path.join(traj_base, result_filename)
+            save_trajectories(all_trajectories, traj_dir)
+            print(f"  Trajectories saved to: {traj_dir}")
 
-    # Clean up checkpoint file after successful completion
-    if os.path.exists(ckpt_path):
-        os.remove(ckpt_path)
-        print(f"  Checkpoint cleaned up: {ckpt_path}")
+        # Clean up checkpoint file after successful completion
+        if ckpt_path and os.path.exists(ckpt_path):
+            os.remove(ckpt_path)
+            print(f"  Checkpoint cleaned up: {ckpt_path}")
 
-    print(f"\n  Results saved to: {resfile}")
+        print(f"\n  Results saved to: {resfile}")
 
     # Attach per-case results for callers (e.g. reactive skill generation).
     # Not serialized to JSON file — only available in the returned dict.
@@ -2947,8 +2957,16 @@ def eval_gen_cases(
     agent_type: str = "mini",
     is_baseline: bool = False,
     skill_mode=None,
+    persist_results: bool = True,
 ):
-    """Evaluate agent on specific RedCode-Gen cases."""
+    """Evaluate agent on specific RedCode-Gen cases.
+
+    Args:
+        persist_results: If False, skip writing result JSON, checkpoint, and
+            trajectory files. Only the in-memory eval_log (with "Results" key)
+            is returned. Used for reactive train-baseline runs where we only
+            need the scores to filter failed cases.
+    """
     os.makedirs(result_base, exist_ok=True)
     start_time = time.time()
     data_split = cases[0]["split"] if cases else "gen"
@@ -2975,10 +2993,10 @@ def eval_gen_cases(
         data_split, unique_dataset_ids, agent_name, model_name, skill_type, run_idx,
         is_baseline=is_baseline, skill_mode=skill_mode, agent_type=agent_type
     )
-    ckpt_path = _checkpoint_path(result_base, result_filename)
+    ckpt_path = _checkpoint_path(result_base, result_filename) if persist_results else None
 
     # Load checkpoint: skip already-completed cases
-    ckpt_results = _load_checkpoint(ckpt_path)
+    ckpt_results = _load_checkpoint(ckpt_path) if persist_results else {}
     total_items = len(work_items)
     if ckpt_results:
         work_items = [item for item in work_items if item["case_id"] not in ckpt_results]
@@ -3004,7 +3022,8 @@ def eval_gen_cases(
             agent_type=agent_type,
             dry_run=dry_run,
         )
-        _append_checkpoint(ckpt_path, result, lock)
+        if persist_results:
+            _append_checkpoint(ckpt_path, result, lock)
         with lock:
             all_results.append(result)
             if trajectory:
@@ -3045,23 +3064,24 @@ def eval_gen_cases(
         "Test Case IDs": sorted(set(case['index'] for case in cases)),
     }
 
-    resfile = os.path.join(result_base, result_filename)
+    if persist_results:
+        resfile = os.path.join(result_base, result_filename)
 
-    with open(resfile, "w") as f:
-        json.dump(eval_log, f, indent=2)
+        with open(resfile, "w") as f:
+            json.dump(eval_log, f, indent=2)
 
-    # Save trajectories as folder matching the result filename (sans .json)
-    if all_trajectories:
-        traj_dir = os.path.join(traj_base, result_filename)
-        save_trajectories(all_trajectories, traj_dir)
-        print(f"  Trajectories saved to: {traj_dir}")
+        # Save trajectories as folder matching the result filename (sans .json)
+        if all_trajectories:
+            traj_dir = os.path.join(traj_base, result_filename)
+            save_trajectories(all_trajectories, traj_dir)
+            print(f"  Trajectories saved to: {traj_dir}")
 
-    # Clean up checkpoint file after successful completion
-    if os.path.exists(ckpt_path):
-        os.remove(ckpt_path)
-        print(f"  Checkpoint cleaned up: {ckpt_path}")
+        # Clean up checkpoint file after successful completion
+        if ckpt_path and os.path.exists(ckpt_path):
+            os.remove(ckpt_path)
+            print(f"  Checkpoint cleaned up: {ckpt_path}")
 
-    print(f"\n  Results saved to: {resfile}")
+        print(f"\n  Results saved to: {resfile}")
 
     # Attach per-case results for callers (e.g. reactive skill generation).
     # Not serialized to JSON file — only available in the returned dict.
