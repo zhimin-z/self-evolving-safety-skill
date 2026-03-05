@@ -1567,7 +1567,7 @@ Output:
     )
     parser.add_argument(
         '--model', type=str, default=None,
-        help='Model to use (e.g., anthropic/anthropic/claude-haiku-4.5). Overrides config file.'
+        help='Model to use (e.g., openrouter/deepseek/deepseek-v3.2). Overrides config file.'
     )
     parser.add_argument(
         '--config_path', type=str, default=None,
@@ -1581,7 +1581,7 @@ Output:
         '--mode', type=str, nargs='+', default=None,
         help='Skill mode variant. For reactive/proactive/fusion: "aggregate" or "separate". '
              'For constitutional: safety standard filenames or "all" (expands to all standards). '
-             'Default: "aggregate" for reactive/proactive/fusion, "all" for constitutional.'
+             'Default: "separate" for reactive/proactive/fusion, "all" for constitutional.'
     )
     parser.add_argument(
         '--fusion_base', type=str, choices=['reactive', 'proactive'], default=None,
@@ -1623,7 +1623,7 @@ Output:
     # ================================================================
     if args.skill in ('reactive', 'proactive'):
         # Default to aggregate
-        mode_raw = args.mode or ['aggregate']
+        mode_raw = args.mode or ['separate']
         if len(mode_raw) != 1 or mode_raw[0] not in ('aggregate', 'separate'):
             parser.error("--mode must be 'aggregate' or 'separate' for reactive/proactive skills")
         skill_mode = mode_raw[0]  # str: "aggregate" or "separate"
@@ -1632,7 +1632,7 @@ Output:
         # --fusion_base is required, --fusion_std selects constitutional standards
         if not args.fusion_base:
             parser.error("--fusion_base is required for fusion skills (choose 'reactive' or 'proactive')")
-        mode_raw = args.mode or ['aggregate']
+        mode_raw = args.mode or ['separate']
         if len(mode_raw) != 1 or mode_raw[0] not in ('aggregate', 'separate'):
             parser.error("--mode must be 'aggregate' or 'separate' for fusion skills")
         skill_mode = mode_raw[0]  # str: "aggregate" or "separate"

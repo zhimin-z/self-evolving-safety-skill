@@ -55,7 +55,7 @@ environment:
 
 model:
   # Use OpenRouter format to ensure litellm routes through OpenRouter
-  model_name: openrouter/anthropic/claude-haiku-4.5
+  model_name: openrouter/deepseek/deepseek-v3.2
   # Cache control: "auto" enables for Anthropic, "default_end" always, null disables
   set_cache_control: auto
   model_kwargs:
