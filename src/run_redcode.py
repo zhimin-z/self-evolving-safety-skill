@@ -10,28 +10,28 @@ The --mode flag is the variant selector for all skill types:
 
 Usage:
     # Baseline evaluation only (no skill, no mode needed)
-    python evaluation/run_redcode.py --split exec --dataset_ids 4
-    python evaluation/run_redcode.py --split exec --dataset_ids all
+    python src/run_redcode.py --split exec --dataset_ids 4
+    python src/run_redcode.py --split exec --dataset_ids all
 
     # Reactive/Proactive with aggregate mode (default)
-    python evaluation/run_redcode.py --skill reactive --mode aggregate --split exec --dataset_ids 1 2 3 --n_runs 5
-    python evaluation/run_redcode.py --skill proactive --mode aggregate --split all --dataset_ids all --n_runs 3
+    python src/run_redcode.py --skill reactive --mode aggregate --split exec --dataset_ids 1 2 3 --n_runs 5
+    python src/run_redcode.py --skill proactive --mode aggregate --split all --dataset_ids all --n_runs 3
 
     # Reactive/Proactive with separate mode (per-dataset)
-    python evaluation/run_redcode.py --skill reactive --mode separate --split exec --dataset_ids 1 2 3 --n_runs 5
-    python evaluation/run_redcode.py --skill proactive --mode separate --split exec --dataset_ids 4 --n_runs 5
+    python src/run_redcode.py --skill reactive --mode separate --split exec --dataset_ids 1 2 3 --n_runs 5
+    python src/run_redcode.py --skill proactive --mode separate --split exec --dataset_ids 4 --n_runs 5
 
     # Constitutional (--mode selects safety standards; default "all")
-    python evaluation/run_redcode.py --skill constitutional --split exec --dataset_ids all
-    python evaluation/run_redcode.py --skill constitutional --mode owaspai_general_controls.md --split exec --dataset_ids all
-    python evaluation/run_redcode.py --skill constitutional --mode nist_ai_rmf_playbook.json owaspai_general_controls.md --split exec --dataset_ids all
+    python src/run_redcode.py --skill constitutional --split exec --dataset_ids all
+    python src/run_redcode.py --skill constitutional --mode owaspai_general_controls.md --split exec --dataset_ids all
+    python src/run_redcode.py --skill constitutional --mode nist_ai_rmf_playbook.json owaspai_general_controls.md --split exec --dataset_ids all
 
     # Fusion (reuses existing base skill + constitutional skill files, fuses and evaluates)
-    python evaluation/run_redcode.py --skill fusion --fusion_base reactive --mode aggregate --split exec --dataset_ids all
-    python evaluation/run_redcode.py --skill fusion --fusion_base proactive --mode separate --fusion_std owaspai_general_controls.md --split exec --dataset_ids 1 2 3
+    python src/run_redcode.py --skill fusion --fusion_base reactive --mode aggregate --split exec --dataset_ids all
+    python src/run_redcode.py --skill fusion --fusion_base proactive --mode separate --fusion_std owaspai_general_controls.md --split exec --dataset_ids 1 2 3
 
     # Dry run
-    python evaluation/run_redcode.py --split exec --dataset_ids 4 --dry_run
+    python src/run_redcode.py --split exec --dataset_ids 4 --dry_run
 """
 
 import argparse
@@ -1546,20 +1546,20 @@ def main():
         epilog="""\
 Examples:
   # Reactive/Proactive with aggregate mode (pool all datasets)
-  python evaluation/run_redcode.py --skill reactive --mode aggregate --split exec --dataset_ids 1 2 3 --n_runs 5
+  python src/run_redcode.py --skill reactive --mode aggregate --split exec --dataset_ids 1 2 3 --n_runs 5
 
   # Reactive/Proactive with separate mode (per-dataset)
-  python evaluation/run_redcode.py --skill reactive --mode separate --split exec --dataset_ids 1 2 3 --n_runs 5
-  python evaluation/run_redcode.py --skill proactive --mode separate --split all --dataset_ids all --n_runs 3
+  python src/run_redcode.py --skill reactive --mode separate --split exec --dataset_ids 1 2 3 --n_runs 5
+  python src/run_redcode.py --skill proactive --mode separate --split all --dataset_ids all --n_runs 3
 
   # Constitutional (--mode selects safety standards; default "all" expands to all files)
-  python evaluation/run_redcode.py --skill constitutional --split exec --dataset_ids all
-  python evaluation/run_redcode.py --skill constitutional --mode owaspai_general_controls.md --split exec --dataset_ids all
-  python evaluation/run_redcode.py --skill constitutional --mode owaspai_general_controls.md nist_ai_rmf_playbook.json --split exec --dataset_ids all --n_runs 3
+  python src/run_redcode.py --skill constitutional --split exec --dataset_ids all
+  python src/run_redcode.py --skill constitutional --mode owaspai_general_controls.md --split exec --dataset_ids all
+  python src/run_redcode.py --skill constitutional --mode owaspai_general_controls.md nist_ai_rmf_playbook.json --split exec --dataset_ids all --n_runs 3
 
   # Fusion (reuses existing base + constitutional skill files, fuses and evaluates)
-  python evaluation/run_redcode.py --skill fusion --fusion_base reactive --mode aggregate --split exec --dataset_ids all --n_runs 1
-  python evaluation/run_redcode.py --skill fusion --fusion_base proactive --mode separate --fusion_std owaspai_general_controls.md --split exec --dataset_ids 1 2 3
+  python src/run_redcode.py --skill fusion --fusion_base reactive --mode aggregate --split exec --dataset_ids all --n_runs 1
+  python src/run_redcode.py --skill fusion --fusion_base proactive --mode separate --fusion_std owaspai_general_controls.md --split exec --dataset_ids 1 2 3
 
 Output:
   Each run generates TWO result files: skill + baseline comparison
