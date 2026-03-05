@@ -981,12 +981,14 @@ def _ensure_skill_exists(
     print(f"  Regenerating {skill_type} skill...")
 
     if skill_type == "constitutional":
+        const_run_idx = run_idx if run_idx is not None else 1
         generate_skill(
             skill_type="constitutional",
             split=None,
             dataset_ids=None,
             model=model_name,
             skill_mode=skill_mode,
+            run_idx=const_run_idx,
             agent_type=agent_type,
         )
         return
@@ -1165,15 +1167,18 @@ def run_fusion_experiment(
     # Load constitutional skill once (shared across all runs)
     print(f"\n[1] Locating constitutional skill...")
     const_skill_mode = fusion_std  # list of filenames
+    const_run_idx = 1
     _ensure_skill_exists(
         skill_type="constitutional",
         output_dir=output_dir,
         skill_mode=const_skill_mode,
+        run_idx=const_run_idx,
         model_name=full_model,
         agent_type=agent_type,
     )
     constitutional_content = _locate_skill_file(
         output_dir, "constitutional",
+        run_idx=const_run_idx,
         skill_mode=const_skill_mode, model_name=full_model, agent_type=agent_type
     )
 
