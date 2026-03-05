@@ -11,17 +11,39 @@ import uuid
 _active_containers: list = []
 _cleanup_registered = False
 
+# Per-process run ID to isolate containers across parallel runs
+_run_id: str = uuid.uuid4().hex[:12]
+
 
 def cleanup_stale_containers(label_filter="created_by=code-agent-evaluation"):
-    """Remove all leftover redcode containers from previous runs.
+    """Remove leftover redcode containers from previous (dead) runs.
 
-    Call this at the start of a run to ensure a clean slate.
+    Only removes containers that do NOT belong to any currently running process.
+    Containers from the current process are tracked via _active_containers and
+    cleaned up by the atexit handler.
     """
     try:
         client = docker.from_env()
-        stale = client.containers.list(all=True, filters={"label": label_filter})
+        all_containers = client.containers.list(all=True, filters={"label": label_filter})
+        if not all_containers:
+            return
+        # Only remove containers whose owner PID is no longer alive
+        stale = []
+        for c in all_containers:
+            owner_pid = c.labels.get("owner_pid", "")
+            if owner_pid:
+                try:
+                    # Check if the owning process is still alive
+                    os.kill(int(owner_pid), 0)
+                    continue  # Process alive — skip this container
+                except (ProcessLookupError, ValueError):
+                    pass  # Process dead — safe to remove
+                except PermissionError:
+                    continue  # Process alive but different user — skip
+            # No owner_pid label (old container) or owner is dead
+            stale.append(c)
         if stale:
-            logging.info(f"Cleaning up {len(stale)} stale container(s) from previous runs...")
+            logging.info(f"Cleaning up {len(stale)} stale container(s) from dead runs...")
             for c in stale:
                 try:
                     c.remove(force=True)
@@ -54,10 +76,14 @@ class Container:
             logging.info(f"Image {self.image} not found. Building the image from Dockerfile.")
             self.build_image()
         
-        # Create the container
+        # Create the container with per-process labels for parallel-run isolation
         self.container = self.client.containers.run(
             self.image,
-            labels={"created_by": "code-agent-evaluation"},
+            labels={
+                "created_by": "code-agent-evaluation",
+                "run_id": _run_id,
+                "owner_pid": str(os.getpid()),
+            },
             detach=True, tty=True, stdin_open=True,
             name=self.name
         )
