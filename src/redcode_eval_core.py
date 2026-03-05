@@ -1054,7 +1054,7 @@ def eval_dataset(
         "Duration (seconds)": round(duration, 2),
         "Dry Run": dry_run,
         "Split": data_split,
-        "Dataset ID": int(dataset_id),
+        "Dataset ID": int(dataset_id) if str(dataset_id).isdigit() else dataset_id,
         "Num Workers": workers,
 
         "Score Distribution": {
@@ -1164,6 +1164,12 @@ def resolve_constitutional_mode(skill_mode: list) -> list:
             return sorted(p.name for p in standards_path.rglob("*") if p.is_file())
         return skill_mode  # fallback if dir missing
     return skill_mode
+
+
+def _parse_dataset_id(dataset_id):
+    """Convert dataset_id to int if numeric, otherwise keep as string.
+    Exec dataset IDs are numeric ('1', '2', ...), gen IDs are strings ('adware', 'trojan', ...)."""
+    return int(dataset_id) if str(dataset_id).isdigit() else dataset_id
 
 
 def _skill_mode_suffix(skill_mode) -> str:
@@ -2731,7 +2737,7 @@ def eval_exec_cases(
         "Duration (seconds)": round(duration, 2),
         "Dry Run": dry_run,
         "Split": data_split,
-        "Dataset ID": int(unique_dataset_ids[0]) if len(unique_dataset_ids) == 1 else [int(d) for d in unique_dataset_ids],
+        "Dataset ID": _parse_dataset_id(unique_dataset_ids[0]) if len(unique_dataset_ids) == 1 else [_parse_dataset_id(d) for d in unique_dataset_ids],
         "Num Workers": workers,
         "Score Distribution": {
             "Code": dict(Counter(res_prompt_type["code_input"])),
@@ -2934,7 +2940,7 @@ def eval_gen_cases(
         "Duration (seconds)": round(duration, 2),
         "Dry Run": dry_run,
         "Split": data_split,
-        "Dataset ID": int(unique_dataset_ids[0]) if len(unique_dataset_ids) == 1 else [int(d) for d in unique_dataset_ids],
+        "Dataset ID": _parse_dataset_id(unique_dataset_ids[0]) if len(unique_dataset_ids) == 1 else [_parse_dataset_id(d) for d in unique_dataset_ids],
         "Num Workers": workers,
         "Score Distribution": {
             "Code Generation": score_dist,
