@@ -297,6 +297,73 @@ def print_dataframe(rows: List[DataFrameRow]):
     print(f"Total rows: {len(rows)}")
 
 
+def build_averaged_report(df: pd.DataFrame) -> pd.DataFrame:
+    """Average RR/ASR across all dataset_ids for each (agent, model, split, skill, mode, is_baseline) group."""
+    group_cols = ["agent_name", "model_name", "redcode_split", "skill_type", "mode", "is_baseline"]
+
+    # Columns to average: all RR and ASR columns
+    metric_cols = []
+    for pt in PROMPT_TYPES + ["overall"]:
+        metric_cols.extend([f"{pt}_RR", f"{pt}_ASR"])
+
+    # Also sum raw score counts for reference
+    count_cols = []
+    for pt in PROMPT_TYPES + ["overall"]:
+        count_cols.extend([f"{pt}_s0", f"{pt}_s1", f"{pt}_s3"])
+
+    agg_dict = {}
+    for col in metric_cols:
+        agg_dict[col] = "mean"
+    for col in count_cols:
+        agg_dict[col] = "sum"
+    agg_dict["dataset_id"] = "count"
+
+    avg_df = df.groupby(group_cols, as_index=False).agg(agg_dict)
+    avg_df = avg_df.rename(columns={"dataset_id": "n_datasets"})
+
+    # Reorder columns: group cols, n_datasets, then per-type metrics, then overall
+    ordered = list(group_cols) + ["n_datasets"]
+    for pt in PROMPT_TYPES + ["overall"]:
+        ordered.extend([f"{pt}_s0", f"{pt}_s1", f"{pt}_s3", f"{pt}_RR", f"{pt}_ASR"])
+    avg_df = avg_df[[c for c in ordered if c in avg_df.columns]]
+
+    avg_df = avg_df.sort_values(group_cols).reset_index(drop=True)
+    return avg_df
+
+
+def print_averaged_report(avg_df: pd.DataFrame):
+    """Print averaged report to console."""
+    print("\n" + "=" * 160)
+    print("AVERAGED ACROSS DATASETS")
+    print("=" * 160)
+    header = (
+        f"{'Agent':<15} {'Model':<25} {'Split':<6} {'Skill':<14} {'Mode':<25} {'Base':<5} {'N':>3} "
+        f"{'Code RR':>8} {'Code ASR':>9} "
+        f"{'Jb RR':>7} {'Jb ASR':>8} "
+        f"{'Sum RR':>8} {'Sum ASR':>9} "
+        f"{'Det RR':>8} {'Det ASR':>9} "
+        f"{'All RR':>8} {'All ASR':>9}"
+    )
+    print(header)
+    print("-" * 160)
+
+    for _, r in avg_df.iterrows():
+        model_short = r["model_name"][:23] + ".." if len(str(r["model_name"])) > 25 else r["model_name"]
+        mode_short = r["mode"][:23] + ".." if len(str(r["mode"])) > 25 else r["mode"]
+        print(
+            f"{r['agent_name']:<15} {model_short:<25} {r['redcode_split']:<6} {r['skill_type']:<14} "
+            f"{mode_short:<25} {r['is_baseline']:<5} {r['n_datasets']:>3} "
+            f"{r['code_RR']*100:>7.1f}% {r['code_ASR']*100:>8.1f}% "
+            f"{r['code_jb_RR']*100:>6.1f}% {r['code_jb_ASR']*100:>7.1f}% "
+            f"{r['summary_RR']*100:>7.1f}% {r['summary_ASR']*100:>8.1f}% "
+            f"{r['details_RR']*100:>7.1f}% {r['details_ASR']*100:>8.1f}% "
+            f"{r['overall_RR']*100:>7.1f}% {r['overall_ASR']*100:>8.1f}%"
+        )
+
+    print("=" * 160)
+    print(f"Total groups: {len(avg_df)}")
+
+
 def main():
     repo_root = Path(__file__).parent.parent
     results_dir = repo_root / "results"
@@ -314,18 +381,25 @@ def main():
 
     print_dataframe(rows)
 
-    # Save as CSV
+    # Save detailed CSV (per-dataset)
     reports_dir.mkdir(parents=True, exist_ok=True)
-    output_path = reports_dir / "analysis_report.csv"
 
     sorted_rows = sorted(rows, key=lambda r: (
         r.agent_name, r.model_name, r.redcode_split, r.skill_type, r.mode, r.is_baseline, r.dataset_id
     ))
-
     df = pd.DataFrame([row.to_dict() for row in sorted_rows])
-    df.to_csv(output_path, index=False)
 
-    print(f"\nReport saved to: {output_path}")
+    detail_path = reports_dir / "analysis_report.csv"
+    df.to_csv(detail_path, index=False)
+    print(f"\nDetailed report saved to: {detail_path}")
+
+    # Save averaged CSV (across datasets)
+    avg_df = build_averaged_report(df)
+    print_averaged_report(avg_df)
+
+    avg_path = reports_dir / "analysis_report_averaged.csv"
+    avg_df.to_csv(avg_path, index=False)
+    print(f"\nAveraged report saved to: {avg_path}")
 
 
 if __name__ == "__main__":
