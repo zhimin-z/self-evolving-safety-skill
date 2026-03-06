@@ -60,22 +60,43 @@ def completion_with_retry(max_retries: int = MAX_RETRIES, **kwargs):
             time.sleep(delay)
 
 
-def _get_completion_content(response: Any) -> str:
-    """Extract assistant message content from object or dict responses."""
+def _extract_text_from_content(content: Any) -> str:
+    """Normalize completion content payloads into a plain string."""
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text_part = item.get("text") or item.get("content")
+                if text_part:
+                    parts.append(str(text_part))
+            elif isinstance(item, str):
+                parts.append(item)
+        return "".join(parts)
+    if isinstance(content, str):
+        return content
+    return ""
+
+
+def _get_first_choice_payload(response: Any) -> Dict[str, Any]:
+    """Best-effort extraction of first choice metadata across response formats."""
     # Try attribute access (litellm ModelResponse)
     try:
-        content = response.choices[0].message.content
-        if isinstance(content, list):
-            parts = []
-            for item in content:
-                if isinstance(item, dict):
-                    text_part = item.get("text") or item.get("content")
-                    if text_part:
-                        parts.append(text_part)
-                elif isinstance(item, str):
-                    parts.append(item)
-            return "".join(parts)
-        return content or ""
+        choice = response.choices[0]
+        finish_reason = getattr(choice, "finish_reason", None)
+        message = getattr(choice, "message", None) or getattr(choice, "delta", None)
+        if message is not None and hasattr(message, "model_dump"):
+            message = message.model_dump()
+        if not isinstance(message, dict):
+            message = {
+                "content": getattr(message, "content", None),
+                "reasoning_content": getattr(message, "reasoning_content", None),
+                "reasoning": getattr(message, "reasoning", None),
+            }
+        return {
+            "finish_reason": finish_reason,
+            "content": message.get("content"),
+            "reasoning_content": message.get("reasoning_content") or message.get("reasoning"),
+        }
     except Exception:
         pass
 
@@ -85,23 +106,34 @@ def _get_completion_content(response: Any) -> str:
         if isinstance(data, dict):
             choices = data.get("choices", [])
             if choices:
-                msg = choices[0].get("message") or choices[0].get("delta") or {}
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    parts = []
-                    for item in content:
-                        if isinstance(item, dict):
-                            text_part = item.get("text") or item.get("content")
-                            if text_part:
-                                parts.append(text_part)
-                        elif isinstance(item, str):
-                            parts.append(item)
-                    return "".join(parts)
-                return content or ""
+                choice = choices[0] or {}
+                msg = choice.get("message") or choice.get("delta") or {}
+                return {
+                    "finish_reason": choice.get("finish_reason"),
+                    "content": msg.get("content"),
+                    "reasoning_content": msg.get("reasoning_content") or msg.get("reasoning"),
+                }
     except Exception:
         pass
 
-    return ""
+    return {}
+
+
+def _get_completion_content(response: Any) -> str:
+    """Extract assistant message content from object or dict responses."""
+    choice = _get_first_choice_payload(response)
+    return _extract_text_from_content(choice.get("content"))
+
+
+def _get_completion_meta(response: Any) -> Dict[str, Any]:
+    """Extract lightweight metadata for debug/retry decisions."""
+    choice = _get_first_choice_payload(response)
+    return {
+        "finish_reason": choice.get("finish_reason"),
+        "reasoning_content": _extract_text_from_content(choice.get("reasoning_content")),
+    }
+
+
 def _summarize_response(response: Any) -> str:
     """Best-effort summary for debugging empty LLM responses."""
     try:
@@ -2220,26 +2252,145 @@ def _build_skill_generation_prompt(
 Generate the skill:"""
 
 
-def _generate_skill_from_prompt(prompt: str, model: str, log_label: str, log_extra: dict = None) -> Optional[str]:
+def build_skill_generation_request_kwargs(omit_reasoning: bool = False) -> Dict[str, Any]:
+    """Build provider-agnostic request kwargs for skill generation calls."""
+    kwargs: Dict[str, Any] = {"drop_params": True}
+    if omit_reasoning:
+        # OpenRouter-normalized reasoning control.
+        # Models that don't support these keys should ignore them (drop_params=True).
+        kwargs["reasoning"] = {"effort": "none", "exclude": True}
+        kwargs["include_reasoning"] = False
+    return kwargs
+
+
+def _is_reasoning_mandatory_error(exc: Exception) -> bool:
+    """Return True if provider rejects requests that disable reasoning."""
+    msg = str(exc).lower()
+    return (
+        "reasoning is mandatory" in msg
+        or "cannot be disabled" in msg
+    )
+
+
+def _strip_reasoning_disable_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove reasoning-disable flags for providers that require reasoning."""
+    cleaned = dict(kwargs or {})
+    cleaned.pop("include_reasoning", None)
+
+    reasoning = cleaned.get("reasoning")
+    if isinstance(reasoning, dict):
+        effort = str(reasoning.get("effort", "")).lower()
+        exclude = reasoning.get("exclude")
+        if effort == "none" or exclude is True:
+            cleaned.pop("reasoning", None)
+    return cleaned
+
+
+def _generate_skill_from_prompt(
+    prompt: str,
+    model: str,
+    log_label: str,
+    log_extra: dict = None,
+    request_kwargs: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     """Shared LLM call logic for all skill generation/refinement functions."""
     _log_prompt_size(log_label, prompt, log_extra or {})
     safe_max_tokens = _calculate_safe_max_tokens(len(prompt), model)
+    extra = dict(request_kwargs or {})
+    extra.pop("max_tokens", None)
+    extra.pop("messages", None)
+    extra.pop("model", None)
+    extra.pop("temperature", None)
 
     try:
         print(f"  Generating skill [{log_label}] (max_tokens={safe_max_tokens})...")
-        response = completion_with_retry(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=safe_max_tokens
-        )
+        try:
+            response = completion_with_retry(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=safe_max_tokens,
+                **extra,
+            )
+        except Exception as e:
+            fallback_extra = _strip_reasoning_disable_kwargs(extra)
+            if fallback_extra != extra and _is_reasoning_mandatory_error(e):
+                print(f"  [Reasoning] {log_label}: provider requires reasoning; retrying without omit_reasoning flags.")
+                extra = fallback_extra
+                response = completion_with_retry(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=safe_max_tokens,
+                    **extra,
+                )
+            else:
+                raise
         content = _get_completion_content(response)
-        if not content or not content.strip():
-            print(f"  Error in {log_label}: empty response")
-            print(f"  Response type: {type(response).__name__}")
-            print(f"  Response summary: {_summarize_response(response)}")
-            return None
-        return extract_markdown(content)
+        if content and content.strip():
+            return extract_markdown(content)
+
+        meta = _get_completion_meta(response)
+        finish_reason = meta.get("finish_reason")
+        reasoning_content = meta.get("reasoning_content", "")
+
+        # Some reasoning models may consume tokens on hidden reasoning and end
+        # with empty assistant content. Retry once with explicit final-only output.
+        if finish_reason == "length":
+            retry_max_tokens = min(max(safe_max_tokens * 2, 6144), 12288)
+            print(
+                f"  [Retry] {log_label}: finish_reason=length with empty content; "
+                f"retrying (max_tokens={retry_max_tokens})..."
+            )
+            retry_prompt = (
+                prompt
+                + "\n\nIMPORTANT: Return ONLY the final YAML + Markdown skill content now. "
+                  "Do not include analysis or reasoning text."
+            )
+            try:
+                retry_response = completion_with_retry(
+                    model=model,
+                    messages=[{"role": "user", "content": retry_prompt}],
+                    temperature=0.2,
+                    max_tokens=retry_max_tokens,
+                    **extra,
+                )
+            except Exception as e:
+                fallback_extra = _strip_reasoning_disable_kwargs(extra)
+                if fallback_extra != extra and _is_reasoning_mandatory_error(e):
+                    print(f"  [Reasoning] {log_label}: retry call requires reasoning; retrying without omit_reasoning flags.")
+                    extra = fallback_extra
+                    retry_response = completion_with_retry(
+                        model=model,
+                        messages=[{"role": "user", "content": retry_prompt}],
+                        temperature=0.2,
+                        max_tokens=retry_max_tokens,
+                        **extra,
+                    )
+                else:
+                    raise
+            retry_content = _get_completion_content(retry_response)
+            if retry_content and retry_content.strip():
+                return extract_markdown(retry_content)
+
+            retry_meta = _get_completion_meta(retry_response)
+            print(
+                f"  [Retry] {log_label}: still empty "
+                f"(finish_reason={retry_meta.get('finish_reason')}, "
+                f"reasoning_chars={len(retry_meta.get('reasoning_content', ''))})"
+            )
+
+        # Rare provider quirk: final answer lands in reasoning_content.
+        if reasoning_content:
+            fallback = extract_markdown(reasoning_content)
+            if fallback and "---" in fallback and "\nname:" in fallback:
+                print(f"  [Fallback] {log_label}: using reasoning_content as skill output")
+                return fallback
+
+        print(f"  Error in {log_label}: empty response")
+        print(f"  Response type: {type(response).__name__}")
+        print(f"  Response summary: {_summarize_response(response)}")
+        return None
     except Exception as e:
         print(f"  Error in {log_label}: {type(e).__name__}: {e}")
         import traceback
@@ -2247,7 +2398,11 @@ def _generate_skill_from_prompt(prompt: str, model: str, log_label: str, log_ext
         return None
 
 
-def generate_initial_skill_reactive(cases: List[Dict], model: str = None) -> Optional[str]:
+def generate_initial_skill_reactive(
+    cases: List[Dict],
+    model: str = None,
+    request_kwargs: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     """Generate initial reactive security skill from failed baseline cases."""
     model = get_openrouter_model(model or DEFAULT_MODEL)
     chunk_content = format_chunk_content(cases)
@@ -2284,10 +2439,16 @@ description: Reactive security skill that detects and refuses malicious requests
 ### 2. [Next category...]""",
     )
 
-    return _generate_skill_from_prompt(prompt, model, "skill_init_reactive", {"chunk_chars": len(chunk_content)})
+    return _generate_skill_from_prompt(
+        prompt, model, "skill_init_reactive", {"chunk_chars": len(chunk_content)}, request_kwargs=request_kwargs
+    )
 
 
-def generate_initial_skill_proactive(cases: List[Dict], model: str = None) -> Optional[str]:
+def generate_initial_skill_proactive(
+    cases: List[Dict],
+    model: str = None,
+    request_kwargs: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     """Generate initial proactive security skill."""
     model = get_openrouter_model(model or DEFAULT_MODEL)
     chunk_content = format_chunk_content(cases)
@@ -2323,10 +2484,17 @@ description: Proactive security skill with technical countermeasures against mal
 ### 2. [Next category...]""",
     )
 
-    return _generate_skill_from_prompt(prompt, model, "skill_init_proactive", {"chunk_chars": len(chunk_content)})
+    return _generate_skill_from_prompt(
+        prompt, model, "skill_init_proactive", {"chunk_chars": len(chunk_content)}, request_kwargs=request_kwargs
+    )
 
 
-def generate_initial_skill_constitutional(chunk_text: str, source_name: str, model: str = None) -> Optional[str]:
+def generate_initial_skill_constitutional(
+    chunk_text: str,
+    source_name: str,
+    model: str = None,
+    request_kwargs: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     """Generate initial constitutional security skill from safety standards."""
     model = get_openrouter_model(model or DEFAULT_MODEL)
 
@@ -2359,10 +2527,21 @@ description: Security skill derived from safety standards that minimizes AI agen
 [When and how to refuse — criteria that help the agent make the right call]""",
     )
 
-    return _generate_skill_from_prompt(prompt, model, "skill_init_constitutional", {"chunk_chars": len(chunk_text)})
+    return _generate_skill_from_prompt(
+        prompt, model, "skill_init_constitutional", {"chunk_chars": len(chunk_text)}, request_kwargs=request_kwargs
+    )
 
 
-def refine_skill(existing_skill: str, content: str, source_info: str, chunk_num: int, total_chunks: int, skill_type: str, model: str = None) -> Optional[str]:
+def refine_skill(
+    existing_skill: str,
+    content: str,
+    source_info: str,
+    chunk_num: int,
+    total_chunks: int,
+    skill_type: str,
+    model: str = None,
+    request_kwargs: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     """Refine an existing security skill with new content."""
     model = get_openrouter_model(model or DEFAULT_MODEL)
     requirements = REFINE_COMMON_REQUIREMENTS.format(
@@ -2403,6 +2582,7 @@ covered by the existing skill."""
     result = _generate_skill_from_prompt(
         prompt, model, "skill_refine",
         {"existing_skill_chars": len(existing_skill), "chunk_chars": len(content)},
+        request_kwargs=request_kwargs,
     )
 
     # Validate size — if over limit, keep existing skill to prevent unbounded growth
@@ -2414,7 +2594,14 @@ covered by the existing skill."""
     return result
 
 
-def fuse_skills(base_skill: str, constitutional_skill: str, base_type: str, model: str = None, dry_run: bool = False) -> Optional[str]:
+def fuse_skills(
+    base_skill: str,
+    constitutional_skill: str,
+    base_type: str,
+    model: str = None,
+    dry_run: bool = False,
+    request_kwargs: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     """Fuse a base skill (reactive/proactive) with a constitutional skill.
 
     Merges constitutional safety-standard guidance into a base skill that was
@@ -2481,10 +2668,16 @@ description: Fused security skill combining {base_type} attack analysis with saf
 
 Return ONLY the merged skill content:"""
 
-    fused = _generate_skill_from_prompt(prompt, model, "skill_fuse", {
-        "base_skill_chars": len(base_skill),
-        "constitutional_skill_chars": len(constitutional_skill),
-    })
+    fused = _generate_skill_from_prompt(
+        prompt,
+        model,
+        "skill_fuse",
+        {
+            "base_skill_chars": len(base_skill),
+            "constitutional_skill_chars": len(constitutional_skill),
+        },
+        request_kwargs=request_kwargs,
+    )
 
     # Fallback: if fused skill exceeds limit, concatenate and truncate
     if fused and len(fused) > MAX_SKILL_CHARS:
@@ -2592,6 +2785,7 @@ def generate_skill_from_cases(
     skill_mode=None,
     agent_type: str = "",
     dry_run: bool = False,
+    skill_request_kwargs: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Generate security skill from provided cases (reactive/proactive only).
 
@@ -2630,16 +2824,20 @@ def generate_skill_from_cases(
 
         if skill_content is None:
             if skill_type == "reactive":
-                skill_content = generate_initial_skill_reactive(chunk_cases, model=model)
+                skill_content = generate_initial_skill_reactive(
+                    chunk_cases, model=model, request_kwargs=skill_request_kwargs
+                )
             else:
-                skill_content = generate_initial_skill_proactive(chunk_cases, model=model)
+                skill_content = generate_initial_skill_proactive(
+                    chunk_cases, model=model, request_kwargs=skill_request_kwargs
+                )
             if not skill_content:
                 raise RuntimeError("Failed to generate initial skill")
         else:
             chunk_content = format_chunk_content(chunk_cases)
             refined = refine_skill(
                 skill_content, chunk_content, f"RedCode {split}",
-                chunk_num, total_chunks, skill_type, model=model
+                chunk_num, total_chunks, skill_type, model=model, request_kwargs=skill_request_kwargs
             )
             if refined:
                 skill_content = refined
@@ -3140,7 +3338,17 @@ def eval_gen_cases(
 # Main Evaluation Functions
 # ============================================================================
 
-def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]], model: Optional[str] = None, skill_mode=None, run_idx: int = 1, agent_type: str = "", dry_run: bool = False) -> str:
+def generate_skill(
+    skill_type: str,
+    split: str,
+    dataset_ids: Optional[List[str]],
+    model: Optional[str] = None,
+    skill_mode=None,
+    run_idx: int = 1,
+    agent_type: str = "",
+    dry_run: bool = False,
+    skill_request_kwargs: Optional[Dict[str, Any]] = None,
+) -> str:
     """Generate security skill and return its content.
 
     Args:
@@ -3197,7 +3405,9 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
         for doc in documents:
             for chunk_idx, chunk_total, chunk_text in iter_text_chunks(doc["content"], CHUNK_SIZE_CHARS):
                 if skill_content is None:
-                    skill_content = generate_initial_skill_constitutional(chunk_text, doc["source"], model=model)
+                    skill_content = generate_initial_skill_constitutional(
+                        chunk_text, doc["source"], model=model, request_kwargs=skill_request_kwargs
+                    )
                 else:
                     # Early stopping: skip refinement if skill is near size limit (90%)
                     if len(skill_content) >= MAX_SKILL_CHARS * 0.9:
@@ -3206,7 +3416,7 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
 
                     skill_content = refine_skill(
                         skill_content, chunk_text, doc["source"],
-                        chunk_idx, chunk_total, skill_type, model=model
+                        chunk_idx, chunk_total, skill_type, model=model, request_kwargs=skill_request_kwargs
                     )
 
                 if not skill_content:
@@ -3254,14 +3464,18 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
 
             if skill_content is None:
                 if skill_type == "reactive":
-                    skill_content = generate_initial_skill_reactive(chunk_cases, model=model)
+                    skill_content = generate_initial_skill_reactive(
+                        chunk_cases, model=model, request_kwargs=skill_request_kwargs
+                    )
                 else:
-                    skill_content = generate_initial_skill_proactive(chunk_cases, model=model)
+                    skill_content = generate_initial_skill_proactive(
+                        chunk_cases, model=model, request_kwargs=skill_request_kwargs
+                    )
             else:
                 chunk_content = format_chunk_content(chunk_cases)
                 skill_content = refine_skill(
                     skill_content, chunk_content, f"RedCode {split}",
-                    chunk_num, total_chunks, skill_type, model=model
+                    chunk_num, total_chunks, skill_type, model=model, request_kwargs=skill_request_kwargs
                 )
 
             if not skill_content:

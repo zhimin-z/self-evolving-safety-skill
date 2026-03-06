@@ -73,6 +73,7 @@ from redcode_eval_core import (
     resolve_constitutional_mode,
     get_available_gpus,
     warmup_local_model,
+    build_skill_generation_request_kwargs,
     # Skill generation
     generate_skill_filename,
     generate_result_filename,
@@ -320,6 +321,7 @@ def run_aggregate_experiment(
     model_name: str,
     dry_run: bool,
     agent_type: str = "mini",
+    skill_request_kwargs: dict = None,
 ):
     """Run N iterations of skill generation + evaluation with global 50/50 train/test splits.
 
@@ -464,6 +466,7 @@ def run_aggregate_experiment(
                     skill_mode="aggregate",
                     agent_type=agent_type,
                     dry_run=dry_run,
+                    skill_request_kwargs=skill_request_kwargs,
                 )
         else:
             # PROACTIVE: Generate skill from ALL train cases (no baseline needed)
@@ -478,6 +481,7 @@ def run_aggregate_experiment(
                 skill_mode="aggregate",
                 agent_type=agent_type,
                 dry_run=dry_run,
+                skill_request_kwargs=skill_request_kwargs,
             )
 
         # Inject skill into config (if skill was generated)
@@ -614,6 +618,7 @@ def run_separate_experiment(
     model_name: str,
     dry_run: bool,
     agent_type: str = "mini",
+    skill_request_kwargs: dict = None,
 ):
     """Per-dataset skill generation + evaluation with 50/50 train/test splits.
 
@@ -804,6 +809,7 @@ def run_separate_experiment(
                         skill_mode="separate",
                         agent_type=agent_type,
                         dry_run=dry_run,
+                        skill_request_kwargs=skill_request_kwargs,
                     )
             else:
                 # PROACTIVE: use all train cases
@@ -818,6 +824,7 @@ def run_separate_experiment(
                     skill_mode="separate",
                     agent_type=agent_type,
                     dry_run=dry_run,
+                    skill_request_kwargs=skill_request_kwargs,
                 )
 
             # Inject skill into config (if skill was generated)
@@ -966,6 +973,7 @@ def _ensure_skill_exists(
     dry_run: bool = False,
     benchmark_dir: str = None,
     result_base: str = None,
+    skill_request_kwargs: dict = None,
 ):
     """Check if a skill .md file exists; if missing, regenerate it.
 
@@ -995,6 +1003,7 @@ def _ensure_skill_exists(
             run_idx=const_run_idx,
             agent_type=agent_type,
             dry_run=dry_run,
+            skill_request_kwargs=skill_request_kwargs,
         )
         return
 
@@ -1094,6 +1103,7 @@ def _ensure_skill_exists(
         skill_mode=skill_mode,
         agent_type=agent_type,
         dry_run=dry_run,
+        skill_request_kwargs=skill_request_kwargs,
     )
     print(f"  [Auto-regenerate] Skill regenerated successfully: {filename}")
 
@@ -1136,6 +1146,7 @@ def run_fusion_experiment(
     model_name: str,
     dry_run: bool,
     agent_type: str = "mini",
+    skill_request_kwargs: dict = None,
 ):
     """Fusion experiment: locate existing skill files, fuse, and evaluate.
 
@@ -1182,6 +1193,7 @@ def run_fusion_experiment(
         model_name=full_model,
         agent_type=agent_type,
         dry_run=dry_run,
+        skill_request_kwargs=skill_request_kwargs,
     )
     constitutional_content = _locate_skill_file(
         output_dir, "constitutional",
@@ -1207,7 +1219,7 @@ def run_fusion_experiment(
             config=config, step_limit=step_limit, timeout=timeout,
             agent_name=agent_name, model_name=model_name,
             output_dir=output_dir, result_base=result_base,
-            dry_run=dry_run, agent_type=agent_type,
+            dry_run=dry_run, agent_type=agent_type, skill_request_kwargs=skill_request_kwargs,
         )
     else:  # separate
         _run_fusion_separate(
@@ -1218,7 +1230,7 @@ def run_fusion_experiment(
             config=config, step_limit=step_limit, timeout=timeout,
             agent_name=agent_name, model_name=model_name,
             benchmark_dir=benchmark_dir, output_dir=output_dir, result_base=result_base,
-            dry_run=dry_run, agent_type=agent_type,
+            dry_run=dry_run, agent_type=agent_type, skill_request_kwargs=skill_request_kwargs,
         )
 
 
@@ -1228,7 +1240,7 @@ def _run_fusion_aggregate(
     constitutional_content, split, n_runs,
     config, step_limit, timeout,
     agent_name, model_name, output_dir, result_base,
-    dry_run, agent_type,
+    dry_run, agent_type, skill_request_kwargs=None,
 ):
     """Fusion aggregate: one skill from pooled datasets, evaluate per-dataset."""
     skill_type = "fusion"
@@ -1271,6 +1283,7 @@ def _run_fusion_aggregate(
                 dry_run=dry_run,
                 benchmark_dir=os.path.join(REPO_ROOT, "external/RedCode/dataset"),
                 result_base=result_base,
+                skill_request_kwargs=skill_request_kwargs,
             )
             base_content = _locate_skill_file(
                 output_dir, fusion_base, split, all_dataset_ids,
@@ -1279,7 +1292,14 @@ def _run_fusion_aggregate(
 
             # Fuse
             print(f"\n[3] Fusing {fusion_base} + constitutional skills...")
-            fused_content = fuse_skills(base_content, constitutional_content, fusion_base, model=full_model, dry_run=dry_run)
+            fused_content = fuse_skills(
+                base_content,
+                constitutional_content,
+                fusion_base,
+                model=full_model,
+                dry_run=dry_run,
+                request_kwargs=skill_request_kwargs,
+            )
             if not fused_content:
                 print("  ERROR: Fusion failed")
                 sys.exit(1)
@@ -1382,7 +1402,7 @@ def _run_fusion_separate(
     config, step_limit, timeout,
     agent_name, model_name,
     benchmark_dir, output_dir, result_base,
-    dry_run, agent_type,
+    dry_run, agent_type, skill_request_kwargs=None,
 ):
     """Fusion separate: per-dataset skill files, fuse each, evaluate per-dataset."""
     skill_type = "fusion"
@@ -1443,6 +1463,7 @@ def _run_fusion_separate(
                     dry_run=dry_run,
                     benchmark_dir=benchmark_dir,
                     result_base=result_base,
+                    skill_request_kwargs=skill_request_kwargs,
                 )
                 base_content = _locate_skill_file(
                     output_dir, fusion_base, dataset_split, [dataset_id],
@@ -1451,7 +1472,14 @@ def _run_fusion_separate(
 
                 # Fuse
                 print(f"  Fusing {fusion_base} + constitutional skills...")
-                fused_content = fuse_skills(base_content, constitutional_content, fusion_base, model=full_model, dry_run=dry_run)
+                fused_content = fuse_skills(
+                    base_content,
+                    constitutional_content,
+                    fusion_base,
+                    model=full_model,
+                    dry_run=dry_run,
+                    request_kwargs=skill_request_kwargs,
+                )
                 if not fused_content:
                     print("  ERROR: Fusion failed, skipping this dataset/run")
                     continue
@@ -1628,6 +1656,10 @@ Output:
         '--timeout', type=int, default=-1,
         help='Override command timeout in seconds'
     )
+    parser.add_argument(
+        '--omit_reasoning', action='store_true',
+        help='For skill generation/fusion calls, request final answer only and suppress reasoning content when supported by provider.'
+    )
     args = parser.parse_args()
 
     # ================================================================
@@ -1679,7 +1711,11 @@ Output:
     print(f"Skill: {args.skill}, Mode: {skill_mode}")
     if args.skill == 'fusion':
         print(f"Fusion base: {args.fusion_base}, Fusion standards: {fusion_std}")
+    if args.omit_reasoning:
+        print("Skill generation option: omit_reasoning=True")
     print(f"GPUs: {gpus} ({len(gpus)} visible), Workers: {len(gpus)} (auto from CUDA_VISIBLE_DEVICES)\n")
+
+    skill_request_kwargs = build_skill_generation_request_kwargs(omit_reasoning=args.omit_reasoning)
 
     # ================================================================
     # Pre-warm vLLM server for local models (downloads + loads once)
@@ -1713,6 +1749,7 @@ Output:
             model_name=model_name,
             dry_run=args.dry_run,
             agent_type=args.agent,
+            skill_request_kwargs=skill_request_kwargs,
         )
 
     elif args.skill == 'fusion':
@@ -1731,6 +1768,7 @@ Output:
             model_name=model_name,
             dry_run=args.dry_run,
             agent_type=args.agent,
+            skill_request_kwargs=skill_request_kwargs,
         )
 
     elif args.skill == 'constitutional':
@@ -1764,7 +1802,17 @@ Output:
             if cached_skill is not None:
                 skill_content = cached_skill
             else:
-                skill_content = generate_skill(args.skill, args.split, dataset_ids, model=get_model_full_name(config), skill_mode=skill_mode, run_idx=run_idx, agent_type=args.agent, dry_run=args.dry_run)
+                skill_content = generate_skill(
+                    args.skill,
+                    args.split,
+                    dataset_ids,
+                    model=get_model_full_name(config),
+                    skill_mode=skill_mode,
+                    run_idx=run_idx,
+                    agent_type=args.agent,
+                    dry_run=args.dry_run,
+                    skill_request_kwargs=skill_request_kwargs,
+                )
 
             # Per-dataset interleaving: for each dataset, run skill then baseline
             for dataset_id in exec_ids:

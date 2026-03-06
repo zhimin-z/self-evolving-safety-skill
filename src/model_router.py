@@ -32,6 +32,7 @@ LOCAL_MODEL_PATTERNS = [
     "meta-llama/",
     "mistralai/",
     "deepseek-ai/",
+    "nvidia/",
     "microsoft/",
     "google/",
     "tiiuae/",  # Falcon
