@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 
 
 # Canonical prompt type keys used in column names
-PROMPT_TYPES = ["code", "code_jb", "summary", "details"]
+PROMPT_TYPES = ["code", "code_jb", "summary", "details", "code_gen"]
 
 # Mapping from JSON "Score Distribution" keys to canonical prompt type keys
 PROMPT_TYPE_MAP = {
@@ -32,6 +32,7 @@ PROMPT_TYPE_MAP = {
     "Code w/ jb": "code_jb",
     "Summary": "summary",
     "Details": "details",
+    "Code Generation": "code_gen",
 }
 
 
@@ -274,10 +275,11 @@ def print_dataframe(rows: List[DataFrameRow]):
         f"{'Jb RR':>7} {'Jb ASR':>8} "
         f"{'Sum RR':>8} {'Sum ASR':>9} "
         f"{'Det RR':>8} {'Det ASR':>9} "
+        f"{'Gen RR':>8} {'Gen ASR':>9} "
         f"{'All RR':>8} {'All ASR':>9}"
     )
     print(header)
-    print("=" * 180)
+    print("=" * 200)
 
     for r in sorted_rows:
         d = r.to_dict()
@@ -290,10 +292,11 @@ def print_dataframe(rows: List[DataFrameRow]):
             f"{d['code_jb_RR']*100:>6.1f}% {d['code_jb_ASR']*100:>7.1f}% "
             f"{d['summary_RR']*100:>7.1f}% {d['summary_ASR']*100:>8.1f}% "
             f"{d['details_RR']*100:>7.1f}% {d['details_ASR']*100:>8.1f}% "
+            f"{d['code_gen_RR']*100:>7.1f}% {d['code_gen_ASR']*100:>8.1f}% "
             f"{d['overall_RR']*100:>7.1f}% {d['overall_ASR']*100:>8.1f}%"
         )
 
-    print("=" * 180)
+    print("=" * 200)
     print(f"Total rows: {len(rows)}")
 
 
@@ -333,19 +336,20 @@ def build_averaged_report(df: pd.DataFrame) -> pd.DataFrame:
 
 def print_averaged_report(avg_df: pd.DataFrame):
     """Print averaged report to console."""
-    print("\n" + "=" * 160)
+    print("\n" + "=" * 180)
     print("AVERAGED ACROSS DATASETS")
-    print("=" * 160)
+    print("=" * 180)
     header = (
         f"{'Agent':<15} {'Model':<25} {'Split':<6} {'Skill':<14} {'Mode':<25} {'Base':<5} {'N':>3} "
         f"{'Code RR':>8} {'Code ASR':>9} "
         f"{'Jb RR':>7} {'Jb ASR':>8} "
         f"{'Sum RR':>8} {'Sum ASR':>9} "
         f"{'Det RR':>8} {'Det ASR':>9} "
+        f"{'Gen RR':>8} {'Gen ASR':>9} "
         f"{'All RR':>8} {'All ASR':>9}"
     )
     print(header)
-    print("-" * 160)
+    print("-" * 180)
 
     for _, r in avg_df.iterrows():
         model_short = r["model_name"][:23] + ".." if len(str(r["model_name"])) > 25 else r["model_name"]
@@ -357,10 +361,11 @@ def print_averaged_report(avg_df: pd.DataFrame):
             f"{r['code_jb_RR']*100:>6.1f}% {r['code_jb_ASR']*100:>7.1f}% "
             f"{r['summary_RR']*100:>7.1f}% {r['summary_ASR']*100:>8.1f}% "
             f"{r['details_RR']*100:>7.1f}% {r['details_ASR']*100:>8.1f}% "
+            f"{r['code_gen_RR']*100:>7.1f}% {r['code_gen_ASR']*100:>8.1f}% "
             f"{r['overall_RR']*100:>7.1f}% {r['overall_ASR']*100:>8.1f}%"
         )
 
-    print("=" * 160)
+    print("=" * 180)
     print(f"Total groups: {len(avg_df)}")
 
 
