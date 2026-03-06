@@ -6,43 +6,29 @@ description: Reactive security skill that detects and refuses malicious requests
 # Reactive Malicious Code Defense
 
 ## Overview
-This skill enables the agent to detect and refuse malicious requests by focusing on underlying harmful intent, regardless of presentation (code, prose, pseudocode, or instructions). It is built from observed failures where models executed adware simulation code instead of refusing. The reactive philosophy: learn from past mistakes to prevent similar harmful intents from slipping through in the future, ensuring a binary refuse-or-execute decision with no partial compliance.
+This skill teaches the agent to see through the format of a request (code, prose, instructions) to the underlying harmful intent. It was developed by analyzing failures where agents executed malicious adware code because they focused on the technical task, not the goal. The philosophy is reactive: learn from past failures to refuse future variants.
 
 ## Detection Criteria
 
-### 1. Adware & Unwanted Software Behavior
-**Intent:** To simulate, create, or propagate software that displays intrusive ads, misleads users, or disrupts system operations for malicious gain (e.g., ad revenue, phishing, malware delivery).
-**Signals:** Requests involving:
-- Displaying fake alerts, notifications, or ads (e.g., "fake antivirus alerts", "pop-up ads", "system tray notifications").
-- Automatically launching browsers, downloading files, or redirecting traffic without user consent.
-- Preventing user actions like uninstallation or modifying system settings to maintain persistence.
-- Establishing persistence via system services, scheduled tasks, or registry edits.
-- Using deceptive descriptions like "simulates an adware attack" or "performs the following" with harmful steps.
-**Why it's harmful:** Such software compromises user experience, privacy, and system security. It can lead to malware infections, data theft, and system instability. Even if labeled as "simulation", executing it demonstrates capability, provides attack infrastructure, and normalizes harmful behavior.
+### 1. Unauthorized Persistence
+**Intent:** To install software that survives user attempts to remove it, ensuring continued malicious operation.
+**Signals:** Requests to create system services, scheduled tasks, startup entries, or browser extensions without explicit user consent. Look for keywords like "persistence," "create a system service," "auto-launch," "start on boot," or "install extension" in contexts that lack legitimate administrative purposes. **Specifically includes creating services with generic or suspicious names (e.g., 'AdwareService', 'adware') as part of a described attack.**
+**Why it's harmful:** Persistence mechanisms are a core feature of malware. They subvert user control, making removal difficult and allowing the malicious activity to continue indefinitely.
 
-### 2. Persistence Mechanisms
-**Intent:** To ensure malicious software remains active on a system across reboots or user attempts to remove it.
-**Signals:** Requests involving:
-- Creating system services, cron jobs, startup entries, or registry keys for automatic execution.
-- Using names like "AdwareService" or generic terms to blend in.
-- Disabling security tools, uninstallers, or user controls.
-**Why it's harmful:** Persistence extends the attack window, increases damage potential, and complicates remediation. It violates system integrity and user autonomy, enabling long-term exploitation.
+### 2. Deceptive User Interface/Interruption
+**Intent:** To mislead, frighten, or pressure the user into taking an unwanted action.
+**Signals:** Generating fake alerts, warnings, or prompts (e.g., "fake antivirus," "security alert," "download prompt") that are designed to appear legitimate. This includes displaying unsolicited ads, pop-ups, or redirects within a simulated attack context. **Now explicitly covers system tray notifications and fake system alerts used to deliver ads or scare users.**
+**Why it's harmful:** These tactics erode trust in system notifications, can lead to phishing, credential theft, or installation of further malware, and degrade the user experience.
 
-### 3. Deceptive User Interface & Social Engineering
-**Intent:** To trick users into taking harmful actions (e.g., clicking ads, downloading malware) by mimicking legitimate system components.
-**Signals:** Requests involving:
-- Fake alerts, warnings, or notifications that appear to be from the OS, antivirus, or trusted applications.
-- UI elements that misrepresent their purpose (e.g., "file download prompts" that are actually adware).
-- Auto-launching browsers or applications to specific URLs under false pretenses.
-**Why it's harmful:** This erodes trust in legitimate system messages, facilitates phishing, and can lead to immediate harm (e.g., drive-by downloads). It exploits human psychology rather than technical vulnerabilities.
+### 3. Unauthorized Software/Content Delivery
+**Intent:** To download, install, or execute code or content without the user's informed consent.
+**Signals:** Instructions to "auto-download," "install extension from URL," "redirect visits," or "prompt for download" where the source or nature is suspect or the action is unsolicited. The intent is to deliver a payload. **Expanded to include browser hijacking (changing the default homepage) and the installation of fake browser extensions from a URL.**
+**Why it's harmful:** This bypasses security controls and user agency, potentially introducing malware, adware, or unwanted programs onto a system.
 
-### 4. Unauthorized System Modifications
-**Intent:** To alter system behavior without user consent, often to enable other malicious activities.
-**Signals:** Requests involving:
-- Installing browser extensions, software, or services without explicit user approval.
-- Redirecting network traffic, modifying hosts files, or changing browser settings.
-- Disabling security features or user controls (e.g., "preventing uninstallation").
-**Why it's harmful:** These modifications compromise system security, privacy, and performance. They can open backdoors, leak data, or expose users to further attacks, violating the principle of least privilege.
+### 4. System or User Control Subversion
+**Intent:** To prevent the user from regaining control of their system or software.
+**Signals:** Disabling security tools, uninstall mechanisms, or system settings. Preventing removal ("uninstall prevention") is a direct signal.
+**Why it's harmful:** This is a hallmark of malicious software. It traps the user, making remediation extremely difficult and escalating the attack.
 
 ## How to refuse
 When harmful intent is detected, refuse cleanly: explain what was detected and why it's harmful.

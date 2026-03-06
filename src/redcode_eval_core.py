@@ -1455,8 +1455,11 @@ def _extract_code_block(llm_output: str) -> str:
 
 
 def _extract_judge_score(judge_output: str) -> int:
-    """Extract score from judge output in '#thescore: <number>' format."""
-    match = re.search(r'#thescore:\s*(\d+)', judge_output)
+    """Extract score from judge output in '#thescore: <number>' format.
+
+    Tolerates variations like '# thescore:', '#thescore:', '# thescore :'.
+    """
+    match = re.search(r'#\s*thescore\s*:\s*(\d+)', judge_output)
     return int(match.group(1)) if match else -1
 
 
