@@ -2266,7 +2266,7 @@ covered by the existing skill."""
     return result
 
 
-def fuse_skills(base_skill: str, constitutional_skill: str, base_type: str, model: str = None) -> Optional[str]:
+def fuse_skills(base_skill: str, constitutional_skill: str, base_type: str, model: str = None, dry_run: bool = False) -> Optional[str]:
     """Fuse a base skill (reactive/proactive) with a constitutional skill.
 
     Merges constitutional safety-standard guidance into a base skill that was
@@ -2279,10 +2279,14 @@ def fuse_skills(base_skill: str, constitutional_skill: str, base_type: str, mode
         constitutional_skill: Skill content generated from safety standards.
         base_type: "reactive" or "proactive" (used for naming/phrasing).
         model: LLM model to use for the fusion.
+        dry_run: If True, return stub fused skill without making LLM calls.
 
     Returns:
         Fused skill content, or None on failure.
     """
+    if dry_run:
+        print(f"  [Dry Run] Skipping skill fusion ({base_type} + constitutional)")
+        return f"[DRY RUN] Fused stub skill ({base_type} + constitutional)"
     model = get_openrouter_model(model or DEFAULT_MODEL)
     guidelines = SKILL_WRITING_GUIDELINES.format(max_chars=MAX_SKILL_CHARS)
     footer = SKILL_OUTPUT_FOOTER.format(prohibited_section=PROHIBITED_ACTIONS_SECTION)
@@ -2439,6 +2443,7 @@ def generate_skill_from_cases(
     model: Optional[str] = None,
     skill_mode=None,
     agent_type: str = "",
+    dry_run: bool = False,
 ) -> str:
     """Generate security skill from provided cases (reactive/proactive only).
 
@@ -2451,12 +2456,19 @@ def generate_skill_from_cases(
         run_idx: Run index (for filename)
         model: Model to use for generation (uses DEFAULT_MODEL via OpenRouter if not specified)
         skill_mode: "aggregate" or "separate"
+        dry_run: If True, return stub skill without making LLM calls
 
     Returns:
         Generated skill content
     """
     if not cases:
         raise ValueError("No cases provided for skill generation")
+
+    if dry_run:
+        stub = f"[DRY RUN] Stub {skill_type} skill from {len(cases)} cases"
+        print(f"\n  [Dry Run] Skipping {skill_type} skill generation (would process {len(cases)} cases)")
+        save_skill(stub, skill_type, output_dir, split, dataset_ids, run_idx, skill_mode=skill_mode, model_name=model or "", agent_type=agent_type)
+        return stub
 
     print(f"\n  Generating {skill_type} skill from {len(cases)} training cases...")
     skill_content = None
@@ -2748,7 +2760,7 @@ def eval_exec_cases(
         "Test Case IDs": sorted(set(case['index'] for case in cases)),
     }
 
-    if persist_results:
+    if persist_results and not dry_run:
         resfile = os.path.join(result_base, result_filename)
 
         with open(resfile, "w") as f:
@@ -2948,7 +2960,7 @@ def eval_gen_cases(
         "Test Case IDs": sorted(set(case['index'] for case in cases)),
     }
 
-    if persist_results:
+    if persist_results and not dry_run:
         resfile = os.path.join(result_base, result_filename)
 
         with open(resfile, "w") as f:
@@ -2978,7 +2990,7 @@ def eval_gen_cases(
 # Main Evaluation Functions
 # ============================================================================
 
-def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]], model: Optional[str] = None, skill_mode=None, run_idx: int = 1, agent_type: str = "") -> str:
+def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]], model: Optional[str] = None, skill_mode=None, run_idx: int = 1, agent_type: str = "", dry_run: bool = False) -> str:
     """Generate security skill and return its content.
 
     Args:
@@ -2990,12 +3002,19 @@ def generate_skill(skill_type: str, split: str, dataset_ids: Optional[List[str]]
                     list of safety standard filenames for constitutional
                     (should already be resolved via resolve_constitutional_mode)
         run_idx: Run index for skill filename
+        dry_run: If True, return stub skill without making LLM calls
 
     Returns:
         Generated skill content
     """
     output_dir = os.path.join(REPO_ROOT, "skills")
     benchmark_dir = os.path.join(REPO_ROOT, "external/RedCode/dataset")
+
+    if dry_run:
+        stub = f"[DRY RUN] Stub {skill_type} skill"
+        print(f"[Dry Run] Skipping {skill_type} skill generation")
+        save_skill(stub, skill_type, output_dir, run_idx=run_idx, skill_mode=skill_mode, model_name=model or "", agent_type=agent_type)
+        return stub
 
     print("=" * 60)
     print(f"[1/2] Generating {skill_type} skill")

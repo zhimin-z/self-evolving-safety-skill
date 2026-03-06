@@ -463,6 +463,7 @@ def run_aggregate_experiment(
                     model=get_model_full_name(config),
                     skill_mode="aggregate",
                     agent_type=agent_type,
+                    dry_run=dry_run,
                 )
         else:
             # PROACTIVE: Generate skill from ALL train cases (no baseline needed)
@@ -476,6 +477,7 @@ def run_aggregate_experiment(
                 model=get_model_full_name(config),
                 skill_mode="aggregate",
                 agent_type=agent_type,
+                dry_run=dry_run,
             )
 
         # Inject skill into config (if skill was generated)
@@ -801,6 +803,7 @@ def run_separate_experiment(
                         model=get_model_full_name(config),
                         skill_mode="separate",
                         agent_type=agent_type,
+                        dry_run=dry_run,
                     )
             else:
                 # PROACTIVE: use all train cases
@@ -814,6 +817,7 @@ def run_separate_experiment(
                     model=get_model_full_name(config),
                     skill_mode="separate",
                     agent_type=agent_type,
+                    dry_run=dry_run,
                 )
 
             # Inject skill into config (if skill was generated)
@@ -990,6 +994,7 @@ def _ensure_skill_exists(
             skill_mode=skill_mode,
             run_idx=const_run_idx,
             agent_type=agent_type,
+            dry_run=dry_run,
         )
         return
 
@@ -1088,6 +1093,7 @@ def _ensure_skill_exists(
         model=model_name,
         skill_mode=skill_mode,
         agent_type=agent_type,
+        dry_run=dry_run,
     )
     print(f"  [Auto-regenerate] Skill regenerated successfully: {filename}")
 
@@ -1175,6 +1181,7 @@ def run_fusion_experiment(
         run_idx=const_run_idx,
         model_name=full_model,
         agent_type=agent_type,
+        dry_run=dry_run,
     )
     constitutional_content = _locate_skill_file(
         output_dir, "constitutional",
@@ -1272,7 +1279,7 @@ def _run_fusion_aggregate(
 
             # Fuse
             print(f"\n[3] Fusing {fusion_base} + constitutional skills...")
-            fused_content = fuse_skills(base_content, constitutional_content, fusion_base, model=full_model)
+            fused_content = fuse_skills(base_content, constitutional_content, fusion_base, model=full_model, dry_run=dry_run)
             if not fused_content:
                 print("  ERROR: Fusion failed")
                 sys.exit(1)
@@ -1444,7 +1451,7 @@ def _run_fusion_separate(
 
                 # Fuse
                 print(f"  Fusing {fusion_base} + constitutional skills...")
-                fused_content = fuse_skills(base_content, constitutional_content, fusion_base, model=full_model)
+                fused_content = fuse_skills(base_content, constitutional_content, fusion_base, model=full_model, dry_run=dry_run)
                 if not fused_content:
                     print("  ERROR: Fusion failed, skipping this dataset/run")
                     continue
@@ -1757,7 +1764,7 @@ Output:
             if cached_skill is not None:
                 skill_content = cached_skill
             else:
-                skill_content = generate_skill(args.skill, args.split, dataset_ids, model=get_model_full_name(config), skill_mode=skill_mode, run_idx=run_idx, agent_type=args.agent)
+                skill_content = generate_skill(args.skill, args.split, dataset_ids, model=get_model_full_name(config), skill_mode=skill_mode, run_idx=run_idx, agent_type=args.agent, dry_run=args.dry_run)
 
             # Per-dataset interleaving: for each dataset, run skill then baseline
             for dataset_id in exec_ids:
