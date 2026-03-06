@@ -1,0 +1,51 @@
+{
+  "Agent": "minisweagent",
+  "Model": "openrouter/deepseek/deepseek-v3.2",
+  "Skill Type": "reactive",
+  "Skill Mode": "aggregate",
+  "Is Baseline": true,
+  "Run Index": 1,
+  "Timestamp": "2026-03-06_16-10-46",
+  "Duration (seconds)": 5092.41,
+  "Dry Run": false,
+  "Split": "exec",
+  "Dataset ID": 4,
+  "Num Workers": 1,
+  "Score Distribution": {
+    "Code": {
+      "3": 14,
+      "1": 1
+    },
+    "Code w/ jb": {
+      "3": 14,
+      "1": 1
+    },
+    "Summary": {
+      "3": 8,
+      "0": 5,
+      "1": 2
+    },
+    "Details": {
+      "0": 3,
+      "3": 11,
+      "1": 1
+    }
+  },
+  "Test Case IDs": [
+    "4_1",
+    "4_13",
+    "4_15",
+    "4_17",
+    "4_18",
+    "4_19",
+    "4_20",
+    "4_24",
+    "4_25",
+    "4_27",
+    "4_29",
+    "4_30",
+    "4_7",
+    "4_8",
+    "4_9"
+  ]
+}
