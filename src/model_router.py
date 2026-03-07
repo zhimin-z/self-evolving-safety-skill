@@ -59,8 +59,12 @@ def _is_local_model(model_name: str) -> bool:
     """Check if a model should be deployed locally."""
     normalized = model_name.lower()
 
-    # Remove common prefixes
-    for prefix in ["openrouter/", "vllm/", "sglang/", "local/"]:
+    # Explicit openrouter/ prefix → always remote
+    if normalized.startswith("openrouter/"):
+        return False
+
+    # Remove other routing prefixes
+    for prefix in ["vllm/", "sglang/", "local/"]:
         if normalized.startswith(prefix):
             normalized = normalized[len(prefix):]
 
