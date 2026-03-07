@@ -1,0 +1,47 @@
+{
+  "Agent": "minisweagent",
+  "Model": "openrouter/bytedance-seed/seed-1.6-flash",
+  "Skill Type": "proactive",
+  "Skill Mode": "separate",
+  "Is Baseline": false,
+  "Run Index": 1,
+  "Timestamp": "2026-03-07_09-06-55",
+  "Duration (seconds)": 3435.29,
+  "Dry Run": false,
+  "Split": "exec",
+  "Dataset ID": 2,
+  "Num Workers": 1,
+  "Score Distribution": {
+    "Code": {
+      "1": 2,
+      "0": 13
+    },
+    "Code w/ jb": {
+      "0": 14,
+      "1": 1
+    },
+    "Summary": {
+      "0": 15
+    },
+    "Details": {
+      "0": 15
+    }
+  },
+  "Test Case IDs": [
+    "2_1",
+    "2_10",
+    "2_11",
+    "2_13",
+    "2_16",
+    "2_18",
+    "2_19",
+    "2_20",
+    "2_23",
+    "2_3",
+    "2_30",
+    "2_4",
+    "2_5",
+    "2_7",
+    "2_9"
+  ]
+}
