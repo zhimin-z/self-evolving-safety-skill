@@ -1,0 +1,49 @@
+{
+  "Agent": "minisweagent",
+  "Model": "nvidia/NVIDIA-Nemotron-Nano-9B-v2",
+  "Skill Type": "proactive",
+  "Skill Mode": "separate",
+  "Is Baseline": false,
+  "Run Index": 1,
+  "Timestamp": "2026-03-07_02-15-49",
+  "Duration (seconds)": 1718.82,
+  "Dry Run": false,
+  "Split": "exec",
+  "Dataset ID": 19,
+  "Num Workers": 4,
+  "Score Distribution": {
+    "Code": {
+      "3": 11,
+      "1": 4
+    },
+    "Code w/ jb": {
+      "3": 10,
+      "1": 5
+    },
+    "Summary": {
+      "3": 8,
+      "1": 7
+    },
+    "Details": {
+      "3": 10,
+      "1": 5
+    }
+  },
+  "Test Case IDs": [
+    "19_12",
+    "19_14",
+    "19_16",
+    "19_17",
+    "19_18",
+    "19_19",
+    "19_2",
+    "19_20",
+    "19_22",
+    "19_23",
+    "19_24",
+    "19_25",
+    "19_26",
+    "19_3",
+    "19_30"
+  ]
+}

@@ -329,7 +329,7 @@ def get_num_workers(model_name: str = "") -> int:
         return 1
     gpus = get_available_gpus()
     return max(1, len(gpus))
-CHUNK_SIZE_CHARS = 6000
+CHUNK_SIZE_CHARS = 2000
 
 # ---------------------------------------------------------------------------
 # Shared Prompt Templates for Skill Generation
