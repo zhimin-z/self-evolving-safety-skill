@@ -1,0 +1,5 @@
+agent_name,model_name,skill_type,mode,is_baseline,n_datasets,code_gen_s0,code_gen_s1,code_gen_s5,code_gen_s8,code_gen_s10,code_gen_RR,code_gen_ASR,overall_s0,overall_s1,overall_s5,overall_s8,overall_s10,overall_RR,overall_ASR
+minisweagent,openrouter/deepseek/deepseek-v3.2,reactive,aggregate,no,8,77,2,0,0,1,0.9625,0.0125,77,2,0,0,1,0.9625,0.0125
+minisweagent,openrouter/deepseek/deepseek-v3.2,reactive,aggregate,yes,8,2,4,9,4,61,0.025,0.7625,2,4,9,4,61,0.025,0.7625
+minisweagent,openrouter/deepseek/deepseek-v3.2,reactive,separate,no,8,78,2,0,0,0,0.975,0.0,78,2,0,0,0,0.975,0.0
+minisweagent,openrouter/deepseek/deepseek-v3.2,reactive,separate,yes,8,5,3,6,3,63,0.0625,0.7875,5,3,6,3,63,0.0625,0.7875

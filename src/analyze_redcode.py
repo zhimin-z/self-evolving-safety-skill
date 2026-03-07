@@ -32,6 +32,10 @@ from typing import Dict, List, Optional
 # Canonical prompt type keys used in column names
 PROMPT_TYPES = ["code", "code_jb", "summary", "details", "code_gen"]
 
+# Prompt types per split
+EXEC_PROMPT_TYPES = ["code", "code_jb", "summary", "details"]
+GEN_PROMPT_TYPES = ["code_gen"]
+
 # Mapping from JSON "Score Distribution" keys to canonical prompt type keys
 PROMPT_TYPE_MAP = {
     "Code": "code",
@@ -43,6 +47,8 @@ PROMPT_TYPE_MAP = {
 
 # Score bucket names: covers both exec (s0,s1,s3) and gen (s0,s1,s5,s8,s10)
 ALL_SCORE_KEYS = ("s0", "s1", "s3", "s5", "s8", "s10")
+EXEC_SCORE_KEYS = ("s0", "s1", "s3")
+GEN_SCORE_KEYS = ("s0", "s1", "s5", "s8", "s10")
 
 
 def _empty_scores() -> Dict[str, int]:
@@ -289,6 +295,13 @@ def load_single_file(filepath: Path, aggregated: Dict) -> Optional[bool]:
         return None
 
 
+# Short display labels for prompt types
+_PT_LABELS = {
+    "code": "Code", "code_jb": "Jb", "summary": "Sum",
+    "details": "Det", "code_gen": "Gen", "overall": "All",
+}
+
+
 def print_dataframe(rows: List[DataFrameRow]):
     """Print dataframe as table."""
     if not rows:
@@ -299,36 +312,30 @@ def print_dataframe(rows: List[DataFrameRow]):
         r.agent_name, r.model_name, r.redcode_split, r.skill_type, r.mode, r.is_baseline, r.dataset_id
     ))
 
-    # Print per-prompt-type RR/ASR summary
-    print("\n" + "=" * 180)
-    header = (
-        f"{'Agent':<15} {'Model':<25} {'Split':<6} {'Skill':<14} {'Mode':<25} {'Base':<5} {'DS':<4} "
-        f"{'Code RR':>8} {'Code ASR':>9} "
-        f"{'Jb RR':>7} {'Jb ASR':>8} "
-        f"{'Sum RR':>8} {'Sum ASR':>9} "
-        f"{'Det RR':>8} {'Det ASR':>9} "
-        f"{'Gen RR':>8} {'Gen ASR':>9} "
-        f"{'All RR':>8} {'All ASR':>9}"
-    )
-    print(header)
-    print("=" * 200)
+    # Determine which prompt types have data
+    all_dicts = [r.to_dict() for r in sorted_rows]
+    active_pts = [pt for pt in PROMPT_TYPES + ["overall"]
+                  if any(d.get(f"{pt}_RR", 0) != 0 or d.get(f"{pt}_ASR", 0) != 0
+                         or sum(d.get(f"{pt}_{k}", 0) for k in ALL_SCORE_KEYS) > 0
+                         for d in all_dicts)]
+    if not active_pts and all_dicts:
+        active_pts = PROMPT_TYPES + ["overall"]
 
-    for r in sorted_rows:
-        d = r.to_dict()
+    print("\n" + "=" * 180)
+    hdr = f"{'Agent':<15} {'Model':<25} {'Split':<6} {'Skill':<14} {'Mode':<25} {'Base':<5} {'DS':<8} "
+    hdr += " ".join(f"{_PT_LABELS.get(pt, pt)+' RR':>8} {_PT_LABELS.get(pt, pt)+' ASR':>9}" for pt in active_pts)
+    print(hdr)
+    print("=" * 180)
+
+    for d, r in zip(all_dicts, sorted_rows):
         model_short = r.model_name[:23] + ".." if len(r.model_name) > 25 else r.model_name
         mode_short = r.mode[:23] + ".." if len(r.mode) > 25 else r.mode
-        print(
-            f"{r.agent_name:<15} {model_short:<25} {r.redcode_split:<6} {r.skill_type:<14} "
-            f"{mode_short:<25} {r.is_baseline:<5} {r.dataset_id:<4} "
-            f"{d['code_RR']*100:>7.1f}% {d['code_ASR']*100:>8.1f}% "
-            f"{d['code_jb_RR']*100:>6.1f}% {d['code_jb_ASR']*100:>7.1f}% "
-            f"{d['summary_RR']*100:>7.1f}% {d['summary_ASR']*100:>8.1f}% "
-            f"{d['details_RR']*100:>7.1f}% {d['details_ASR']*100:>8.1f}% "
-            f"{d['code_gen_RR']*100:>7.1f}% {d['code_gen_ASR']*100:>8.1f}% "
-            f"{d['overall_RR']*100:>7.1f}% {d['overall_ASR']*100:>8.1f}%"
-        )
+        line = (f"{r.agent_name:<15} {model_short:<25} {r.redcode_split:<6} {r.skill_type:<14} "
+                f"{mode_short:<25} {r.is_baseline:<5} {r.dataset_id:<8} ")
+        line += " ".join(f"{d.get(f'{pt}_RR', 0)*100:>7.1f}% {d.get(f'{pt}_ASR', 0)*100:>8.1f}%" for pt in active_pts)
+        print(line)
 
-    print("=" * 200)
+    print("=" * 180)
     print(f"Total rows: {len(rows)}")
 
 
@@ -373,37 +380,79 @@ def build_averaged_report(df: pd.DataFrame) -> pd.DataFrame:
 
 def print_averaged_report(avg_df: pd.DataFrame):
     """Print averaged report to console."""
+    if avg_df.empty:
+        return
+
+    # Detect which prompt types have columns in this df
+    active_pts = [pt for pt in PROMPT_TYPES + ["overall"]
+                  if f"{pt}_RR" in avg_df.columns]
+
+    split_label = avg_df["redcode_split"].iloc[0] if "redcode_split" in avg_df.columns else ""
     print("\n" + "=" * 180)
-    print("AVERAGED ACROSS DATASETS")
+    print(f"AVERAGED ACROSS DATASETS{f' ({split_label.upper()})' if split_label else ''}")
     print("=" * 180)
-    header = (
-        f"{'Agent':<15} {'Model':<25} {'Split':<6} {'Skill':<14} {'Mode':<25} {'Base':<5} {'N':>3} "
-        f"{'Code RR':>8} {'Code ASR':>9} "
-        f"{'Jb RR':>7} {'Jb ASR':>8} "
-        f"{'Sum RR':>8} {'Sum ASR':>9} "
-        f"{'Det RR':>8} {'Det ASR':>9} "
-        f"{'Gen RR':>8} {'Gen ASR':>9} "
-        f"{'All RR':>8} {'All ASR':>9}"
-    )
-    print(header)
+
+    has_split_col = "redcode_split" in avg_df.columns
+    hdr = f"{'Agent':<15} {'Model':<25} "
+    if has_split_col:
+        hdr += f"{'Split':<6} "
+    hdr += f"{'Skill':<14} {'Mode':<25} {'Base':<5} {'N':>3} "
+    hdr += " ".join(f"{_PT_LABELS.get(pt, pt)+' RR':>8} {_PT_LABELS.get(pt, pt)+' ASR':>9}" for pt in active_pts)
+    print(hdr)
     print("-" * 180)
 
     for _, r in avg_df.iterrows():
-        model_short = r["model_name"][:23] + ".." if len(str(r["model_name"])) > 25 else r["model_name"]
-        mode_short = r["mode"][:23] + ".." if len(str(r["mode"])) > 25 else r["mode"]
-        print(
-            f"{r['agent_name']:<15} {model_short:<25} {r['redcode_split']:<6} {r['skill_type']:<14} "
-            f"{mode_short:<25} {r['is_baseline']:<5} {r['n_datasets']:>3} "
-            f"{r['code_RR']*100:>7.1f}% {r['code_ASR']*100:>8.1f}% "
-            f"{r['code_jb_RR']*100:>6.1f}% {r['code_jb_ASR']*100:>7.1f}% "
-            f"{r['summary_RR']*100:>7.1f}% {r['summary_ASR']*100:>8.1f}% "
-            f"{r['details_RR']*100:>7.1f}% {r['details_ASR']*100:>8.1f}% "
-            f"{r['code_gen_RR']*100:>7.1f}% {r['code_gen_ASR']*100:>8.1f}% "
-            f"{r['overall_RR']*100:>7.1f}% {r['overall_ASR']*100:>8.1f}%"
+        model_short = str(r["model_name"])[:23] + ".." if len(str(r["model_name"])) > 25 else r["model_name"]
+        mode_short = str(r["mode"])[:23] + ".." if len(str(r["mode"])) > 25 else r["mode"]
+        line = f"{r['agent_name']:<15} {model_short:<25} "
+        if has_split_col:
+            line += f"{r['redcode_split']:<6} "
+        line += f"{r['skill_type']:<14} {mode_short:<25} {r['is_baseline']:<5} {r['n_datasets']:>3} "
+        line += " ".join(
+            f"{r.get(f'{pt}_RR', 0)*100:>7.1f}% {r.get(f'{pt}_ASR', 0)*100:>8.1f}%"
+            for pt in active_pts
         )
+        print(line)
 
     print("=" * 180)
     print(f"Total groups: {len(avg_df)}")
+
+
+def _split_columns(df: pd.DataFrame, split: str) -> pd.DataFrame:
+    """Keep only columns relevant to a given split, drop empty prompt-type columns."""
+    group_cols = ["agent_name", "model_name", "skill_type", "mode", "is_baseline", "dataset_id"]
+    # n_datasets only present in averaged reports
+    if "n_datasets" in df.columns:
+        group_cols = [c for c in group_cols if c != "dataset_id"] + ["n_datasets"]
+
+    if split == "exec":
+        prompt_types = EXEC_PROMPT_TYPES
+        score_keys = EXEC_SCORE_KEYS
+    else:
+        prompt_types = GEN_PROMPT_TYPES
+        score_keys = GEN_SCORE_KEYS
+
+    keep = [c for c in group_cols if c in df.columns]
+    for pt in prompt_types:
+        for k in score_keys:
+            col = f"{pt}_{k}"
+            if col in df.columns:
+                keep.append(col)
+        for m in ("RR", "ASR"):
+            col = f"{pt}_{m}"
+            if col in df.columns:
+                keep.append(col)
+    # Overall columns: recompute from the split-relevant prompt types only
+    for k in score_keys:
+        col = f"overall_{k}"
+        if col in df.columns:
+            keep.append(col)
+    for m in ("RR", "ASR"):
+        col = f"overall_{m}"
+        if col in df.columns:
+            keep.append(col)
+
+    return df[[c for c in keep if c in df.columns]].copy()
 
 
 def main():
@@ -423,7 +472,6 @@ def main():
 
     print_dataframe(rows)
 
-    # Save detailed CSV (per-dataset)
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     sorted_rows = sorted(rows, key=lambda r: (
@@ -431,17 +479,27 @@ def main():
     ))
     df = pd.DataFrame([row.to_dict() for row in sorted_rows])
 
-    detail_path = reports_dir / "analysis_report.csv"
-    df.to_csv(detail_path, index=False)
-    print(f"\nDetailed report saved to: {detail_path}")
+    # Generate per-split reports
+    for split in ("exec", "gen"):
+        split_df = df[df["redcode_split"] == split]
+        if split_df.empty:
+            print(f"\n  No {split} data found, skipping {split} reports.")
+            continue
 
-    # Save averaged CSV (across datasets)
-    avg_df = build_averaged_report(df)
-    print_averaged_report(avg_df)
+        # Dataset (per-dataset rows, split-specific columns)
+        ds_df = _split_columns(split_df, split)
+        ds_path = reports_dir / f"{split}_dataset_analytics.csv"
+        ds_df.to_csv(ds_path, index=False)
+        print(f"\n  {split} dataset report saved to: {ds_path}")
 
-    avg_path = reports_dir / "analysis_report_averaged.csv"
-    avg_df.to_csv(avg_path, index=False)
-    print(f"\nAveraged report saved to: {avg_path}")
+        # Whole (averaged across datasets, split-specific columns)
+        avg_df = build_averaged_report(split_df)
+        avg_df = _split_columns(avg_df, split)
+        avg_path = reports_dir / f"{split}_whole_analytics.csv"
+        avg_df.to_csv(avg_path, index=False)
+        print(f"  {split} whole report saved to: {avg_path}")
+
+        print_averaged_report(avg_df)
 
 
 if __name__ == "__main__":
